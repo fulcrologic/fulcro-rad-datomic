@@ -14,12 +14,12 @@
     [com.rpl.specter :as sp]
     [com.wsscode.pathom.connect :as pc]
     [com.wsscode.pathom.core :as p]
-    [datomic.api :as d]
-    [datomic.function :as df]
-    [datomock.core :as dm :refer [mock-conn]]
+    [datomic.client.api :as d]
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
-    [taoensso.timbre :as log]))
+    [compute.datomic-client-memdb.core :as memdb]
+    [taoensso.timbre :as log])
+  (:import (java.util UUID)))
 
 (def type-map
   {:string   :db.type/string
@@ -90,14 +90,36 @@
           (fn [acc ref-k]
             (cond
               (and (get acc ref-k) (not (vector? (get acc ref-k))))
-              (update acc ref-k (comp :db/ident (partial d/entity db) :db/id))
+              (update acc ref-k (comp :db/ident (partial d/pull db [:db/ident]) :db/id))
               (and (get acc ref-k) (vector? (get acc ref-k)))
-              (update acc ref-k #(mapv (comp :db/ident (partial d/entity db) :db/id) %))
+              (update acc ref-k #(mapv (comp :db/ident (partial d/pull db [:db/ident]) :db/id) %))
               :else acc))
           arg
           refs)
         :else arg))
     arg))
+
+(defn pull-many
+  "like Datomic pull, but takes a collection of ids and returns
+   a collection of entity maps"
+  ([db pull-spec ids]
+   (let [lookup-ref?     (vector? (first ids))
+         order-map       (if lookup-ref?
+                           (into {} (map vector (map second ids) (range)))
+                           (into {} (map vector ids (range))))
+         sort-kw         (if lookup-ref? (ffirst ids) :db/id)
+         missing-ref?    (nil? (seq (filter #(= sort-kw %) pull-spec)))
+         pull-spec       (if missing-ref?
+                           (conj pull-spec sort-kw)
+                           pull-spec)]
+     (->> pull-spec
+          (d/q '[:find (pull ?id pattern)
+               :in $ [?id ...] pattern]
+             db
+             ids)
+          (map first)
+          (sort-by #(order-map (get % sort-kw)))
+          vec))))
 
 (defn pull-*
   "Will either call d/pull or d/pull-many depending on if the input is
@@ -106,9 +128,9 @@
   Optionally takes in a transform-fn, applies to individual result(s)."
   ([db pattern db-idents eid-or-eids]
    (->> (if (and (not (eql/ident? eid-or-eids)) (sequential? eid-or-eids))
-          (d/pull-many db pattern eid-or-eids)
+          (pull-many db pattern eid-or-eids)
           (d/pull db pattern eid-or-eids))
-     (replace-ref-types db db-idents)))
+        (replace-ref-types db db-idents)))
   ([db pattern ident-keywords eid-or-eids transform-fn]
    (let [result (pull-* db pattern ident-keywords eid-or-eids)]
      (if (sequential? result)
@@ -152,7 +174,7 @@
   [{::attr/keys [key->attribute] :as env} ident]
   (= :uuid (some-> ident first key->attribute ::attr/type)))
 
-(defn next-uuid [] (d/squuid))
+(defn next-uuid [] (UUID/randomUUID))
 
 (defn failsafe-id
   "Returns a fail-safe id for the given ident in a transaction. A fail-safe ID will be one of the following:
@@ -274,7 +296,7 @@
       (if (and connection (seq txn))
         (try
           (let [database-atom   (get-in env [::databases schema])
-                {:keys [tempids]} @(d/transact connection txn)
+                {:keys [tempids] :as tx-result} (d/transact connection {:tx-data txn})
                 tempid->real-id (into {}
                                   (map (fn [tempid] [tempid (get tempid->generated-id tempid
                                                               (get tempids (tempid->string tempid)))]))
@@ -300,7 +322,7 @@
     (do
       (log/info "Deleting" ident)
       (let [database-atom (get-in env [::databases schema])]
-        @(d/transact connection txn)
+        (d/transact connection {:tx-data txn})
         (when database-atom
           (reset! database-atom (d/db connection)))
         {}))
@@ -355,7 +377,6 @@
                    :db/cardinality (if (= :many cardinality)
                                      :db.cardinality/many
                                      :db.cardinality/one)
-                   :db/index       true
                    :db/valueType   datomic-type}
             (map? attribute-schema) (merge attribute-schema)
             identity? (assoc :db/unique :db.unique/identity))
@@ -388,53 +409,17 @@
           txn (into txn (enumerated-values attributes))]
       txn)))
 
-(defn config->postgres-url [{:postgresql/keys [user host port password database]
-                             datomic-db       :datomic/database}]
-  (assert user ":postgresql/user must be specified")
-  (assert host ":postgresql/host must be specified")
-  (assert port ":postgresql/port must be specified")
-  (assert password ":postgresql/password must be specified")
-  (assert database ":postgresql/database must be specified")
-  (assert datomic-db ":datomic/database must be specified")
-  (str "datomic:sql://" datomic-db "?jdbc:postgresql://" host (when port (str ":" port)) "/"
-    database "?user=" user "&password=" password))
-
-(defn config->mysql-url [{:mysql/keys [user host port password database]
-                          datomic-db  :datomic/database}]
-  (assert user ":mysql/user must be specified")
-  (assert host ":mysql/host must be specified")
-  (assert port ":mysql/port must be specified")
-  (assert password ":mysql/password must be specified")
-  (assert database ":mysql/database must be specified")
-  (assert datomic-db ":datomic/database must be specified")
-  (str "datomic:sql://" datomic-db "?jdbc:mysql://" host (when port (str ":" port)) "/"
-    database "?user=" user "&password=" password "&useSSL=false"))
-
-(defn config->free-url [{:free/keys [host port]
-                         datomic-db :datomic/database}]
-  (assert host ":free/host must be specified")
-  (assert port ":free/port must be specified")
-  (assert datomic-db ":datomic/database must be specified")
-  (str "datomic:free://" host ":" port "/" datomic-db))
-
-(defn config->url [{:datomic/keys [driver]
-                    :as           config}]
-  (case driver
-    :mem (str "datomic:mem://" (:datomic/database config))
-    :free (config->free-url config)
-    :postgresql (config->postgres-url config)
-    :mysql (config->mysql-url config)
-    (throw (ex-info "Unsupported Datomic driver." {:driver driver}))))
-
+;; TODO - handle transaction functions
 (defn ensure-transactor-functions!
   "Must be called on any Datomic database that will be used with automatic form save. This
   adds transactor functions.  The built-in startup logic (if used) will automatically call this,
   but if you create/start your databases with custom code you should run this on your newly
   created database."
   [conn]
-  @(d/transact conn [{:db/id    (d/tempid :db.part/user)
-                      :db/ident :com.fulcrologic.rad.fn/set-to-many-enumeration
-                      :db/fn    (df/construct
+  (comment
+    @(d/transact conn [{:db/id    (d/tempid :db.part/user)
+                        :db/ident :com.fulcrologic.rad.fn/set-to-many-enumeration
+                        :db/fn    (df/construct
                                   '{:lang   "clojure"
                                     :params [db eid rel set-of-enumerated-values]
                                     :code   (do
@@ -464,7 +449,7 @@
                                                          (str "ident must be an ident, got " ident))))
                                               (let [ref-val (or (:db/id (datomic.api/entity db ident))
                                                               (str (second ident)))]
-                                                [[:db/add eid rel ref-val]]))})}]))
+                                                [[:db/add eid rel ref-val]]))})}])))
 
 (>defn verify-schema!
   "Validate that a database supports then named `schema`. This function finds all attributes
@@ -495,6 +480,26 @@
             (log/error qualified-key "for schema" schema "is incorrect in the database, since cardinalities do not match:" (name cardinality) "vs" attr-cardinality)
             (die!)))))))
 
+(defn config->client [{:datomic/keys [client]}]
+  (if (= client :mock)
+    (memdb/client {})
+    (d/client client)))
+
+(defn ensure-schema!
+  ([all-attributes {:datomic/keys [schema] :as config} conn]
+   (ensure-schema! all-attributes config {} conn))
+  ([all-attributes {:datomic/keys [schema] :as config} schemas conn]
+   (let [generator (get schemas schema :auto)]
+     (cond
+       (= :auto generator) (let [txn (automatic-schema all-attributes schema)]
+                             (log/info "Transacting automatic schema.")
+                             (log/debug "Schema:\n" (with-out-str (pprint txn)))
+                             (d/transact conn {:tx-data txn}))
+       (ifn? generator) (do
+                          (log/info "Running custom schema function.")
+                          (generator conn))
+       :otherwise (log/info "Schema management disabled.")))))
+
 (defn start-database!
   "Starts a Datomic database connection given the standard sub-element config described
   in `start-databases`. Typically use that function instead of this one.
@@ -508,28 +513,13 @@
   * `schemas` a map from schema name to either :auto, :none, or (fn [conn]).
 
   Returns a migrated database connection."
-  [all-attributes {:datomic/keys [schema prevent-changes?] :as config} schemas]
-  (let [url             (config->url config)
-        generator       (get schemas schema :auto)
-        _               (d/create-database url)
-        mock?           (boolean (or prevent-changes? (System/getProperty "force.mocked.connection")))
-        real-connection (d/connect url)
-        conn            (if mock? (dm/fork-conn real-connection) real-connection)]
-    (when mock?
-      (log/warn "==========================================================")
-      (log/warn "Database mocking enabled. No database changes will persist!")
-      (log/warn "=========================================================="))
+  [all-attributes {:datomic/keys [schema database] :as config} schemas]
+  (let [client          (config->client config)
+        _               (d/create-database client {:db-name database})
+        conn            (d/connect client {:db-name database})]
     (log/info "Adding form save support to database transactor functions.")
     (ensure-transactor-functions! conn)
-    (cond
-      (= :auto generator) (let [txn (automatic-schema all-attributes schema)]
-                            (log/info "Transacting automatic schema.")
-                            (log/debug "Schema:\n" (with-out-str (pprint txn)))
-                            @(d/transact conn txn))
-      (ifn? generator) (do
-                         (log/info "Running custom schema function.")
-                         (generator conn))
-      :otherwise (log/info "Schema management disabled."))
+    (ensure-schema! all-attributes config schemas conn)
     (verify-schema! (d/db conn) schema all-attributes)
     (log/info "Finished connecting to and migrating database.")
     conn))
@@ -557,21 +547,11 @@
 
   ```
   {:production-shard-1 {:datomic/schema :production
-                        :datomic/driver :postgresql
-                        :datomic/database \"prod\"
-                        :postgresql/host \"localhost\"
-                        :postgresql/port \"localhost\"
-                        :postgresql/user \"datomic\"
-                        :postgresql/password \"datomic\"
-                        :postgresql/database \"datomic\"}}
+                        :datomic/client  {<client config map; see Datomic Cloud docs>}
+                        :datomic/database \"prod\"}}
   ```
 
   The `:datomic/schema` is used to select the attributes that will appear in that database's schema.
-  The remaining parameters select and configure the back-end storage system for the database.
-
-  Each supported driver type has custom options for configuring it. See Fulcro's config
-  file support for a good method of defining these in EDN config files for use in development
-  and production environments.
 
   Returns a map whose keys are the database keys (i.e. `:production-shard-1`) and
   whose values are the live database connection.
@@ -585,6 +565,12 @@
        (assoc m k (start-database! all-attributes v schemas)))
      {}
      (::databases config))))
+
+(defn empty-db-connection [all-attributes schema]
+  (let [mock-config {:datomic/client :mock
+                     :datomic/schema schema
+                     :datomic/database (str (gensym "test-database"))}]
+    (start-database! all-attributes mock-config {})))
 
 (defn entity-query
   [{:keys       [::attr/schema ::id-attribute]
@@ -677,23 +663,20 @@
                                 entity-id->attributes)]
     entity-resolvers))
 
-(def ^:private pristine-db (atom nil))
-(def ^:private migrated-dbs (atom {}))
+#_(def ^:private migrated-dbs (atom {}))
 
-(defn pristine-db-connection
-  "Returns a Datomic database that has no application schema or data."
+#_(defn pristine-db-connection
+  "Returns a mock Datomic database that has no application schema or data."
   []
-  (locking pristine-db
-    (when-not @pristine-db
-      (let [db-url (str "datomic:mem://" (gensym "test-database"))
-            _      (log/info "Creating test database" db-url)
-            _      (d/create-database db-url)
-            conn   (d/connect db-url)]
-        (ensure-transactor-functions! conn)
-        (reset! pristine-db (d/db conn))))
-    (dm/mock-conn @pristine-db)))
+  (let [client (memdb/client {})
+        db-name (str (gensym "test-database"))
+        _ (log/info "Creating test database" db-name)
+        _ (d/create-database client {:db-name db-name})
+        conn (d/connect client {:db-name db-name})]
+    (ensure-transactor-functions! conn)
+    (d/db conn)))
 
-(defn empty-db-connection
+#_(defn empty-db-connection
   "Returns a Datomic database that contains the given application schema, but no data.
    This function must be passed a schema name (keyword).  The optional second parameter
    is the actual schema to use in the empty database, otherwise automatic generation will be used
@@ -719,7 +702,7 @@
              (swap! migrated-dbs assoc h db)
              (dm/mock-conn db))))))))
 
-(defn reset-migrated-dbs!
+#_(defn reset-migrated-dbs!
   "Forget the cached versions of test databases obtained from empty-db-connection."
   []
   (reset! migrated-dbs {}))
