@@ -331,38 +331,8 @@
 (def suggested-logging-blacklist
   "A vector containing a list of namespace strings that generate a lot of debug noise when using Datomic. Can
   be added to Timbre's ns-blacklist to reduce logging overhead."
-  ["com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool"
-   "com.mchange.v2.c3p0.stmt.GooGooStatementCache"
-   "com.mchange.v2.resourcepool.BasicResourcePool"
-   "com.zaxxer.hikari.pool.HikariPool"
-   "com.zaxxer.hikari.pool.PoolBase"
-   "com.mchange.v2.c3p0.impl.AbstractPoolBackedDataSource"
-   "com.mchange.v2.c3p0.impl.NewPooledConnection"
-   "datomic.common"
-   "datomic.connector"
-   "datomic.coordination"
-   "datomic.db"
-   "datomic.index"
-   "datomic.kv-cluster"
-   "datomic.log"
-   "datomic.peer"
-   "datomic.process-monitor"
-   "datomic.reconnector2"
-   "datomic.slf4j"
-   "io.netty.buffer.PoolThreadCache"
-   "org.apache.http.impl.conn.PoolingHttpClientConnectionManager"
-   "org.projectodd.wunderboss.web.Web"
-   "org.quartz.core.JobRunShell"
-   "org.quartz.core.QuartzScheduler"
-   "org.quartz.core.QuartzSchedulerThread"
-   "org.quartz.impl.StdSchedulerFactory"
-   "org.quartz.impl.jdbcjobstore.JobStoreTX"
-   "org.quartz.impl.jdbcjobstore.SimpleSemaphore"
-   "org.quartz.impl.jdbcjobstore.StdRowLockSemaphore"
-   "org.quartz.plugins.history.LoggingJobHistoryPlugin"
-   "org.quartz.plugins.history.LoggingTriggerHistoryPlugin"
-   "org.quartz.utils.UpdateChecker"
-   "shadow.cljs.devtools.server.worker.impl"])
+  ;; TODO - need to identify these for Cloud
+  ["shadow.cljs.devtools.server.worker.impl"])
 
 (defn- attribute-schema [attributes]
   (mapv
@@ -409,47 +379,6 @@
           txn (into txn (enumerated-values attributes))]
       txn)))
 
-;; TODO - handle transaction functions
-(defn ensure-transactor-functions!
-  "Must be called on any Datomic database that will be used with automatic form save. This
-  adds transactor functions.  The built-in startup logic (if used) will automatically call this,
-  but if you create/start your databases with custom code you should run this on your newly
-  created database."
-  [conn]
-  (comment
-    @(d/transact conn [{:db/id    (d/tempid :db.part/user)
-                        :db/ident :com.fulcrologic.rad.fn/set-to-many-enumeration
-                        :db/fn    (df/construct
-                                  '{:lang   "clojure"
-                                    :params [db eid rel set-of-enumerated-values]
-                                    :code   (do
-                                              (when-not (every? qualified-keyword? set-of-enumerated-values)
-                                                (throw (IllegalArgumentException.
-                                                         (str "set-to-many-enumeration expects a set of keywords that are idents" set-of-enumerated-values))))
-                                              (let [old-val    (into #{}
-                                                                 (map :db/ident)
-                                                                 (get (datomic.api/pull db [{rel [:db/ident]}] eid) rel))
-                                                    to-retract (into []
-                                                                 (map (fn [k] [:db/retract eid rel k]))
-                                                                 (clojure.set/difference old-val set-of-enumerated-values))
-                                                    eid        (or (:db/id (datomic.api/pull db [:db/id] eid)) (str (second eid)))
-                                                    txn        (into to-retract
-                                                                 (map (fn [k] [:db/add eid rel k]))
-                                                                 (clojure.set/difference set-of-enumerated-values old-val))]
-                                                txn))})}
-                     {:db/id    (d/tempid :db.part/user)
-                      :db/ident :com.fulcrologic.rad.fn/add-ident
-                      :db/fn    (df/construct
-                                  '{:lang   "clojure"
-                                    :params [db eid rel ident]
-                                    :code   (do
-                                              (when-not (and (= 2 (count ident))
-                                                          (keyword? (first ident)))
-                                                (throw (IllegalArgumentException.
-                                                         (str "ident must be an ident, got " ident))))
-                                              (let [ref-val (or (:db/id (datomic.api/entity db ident))
-                                                              (str (second ident)))]
-                                                [[:db/add eid rel ref-val]]))})}])))
 
 (>defn verify-schema!
   "Validate that a database supports then named `schema`. This function finds all attributes
@@ -517,8 +446,6 @@
   (let [client          (config->client config)
         _               (d/create-database client {:db-name database})
         conn            (d/connect client {:db-name database})]
-    (log/info "Adding form save support to database transactor functions.")
-    (ensure-transactor-functions! conn)
     (ensure-schema! all-attributes config schemas conn)
     (verify-schema! (d/db conn) schema all-attributes)
     (log/info "Finished connecting to and migrating database.")
@@ -528,7 +455,6 @@
   "Adds necessary transactor functions and verifies schema of a Datomic database that is not
   under the control of this adapter, but is used by it."
   [conn schema all-attributes]
-  (ensure-transactor-functions! conn)
   (verify-schema! (d/db conn) schema all-attributes))
 
 (defn start-databases
@@ -662,50 +588,6 @@
                                 []
                                 entity-id->attributes)]
     entity-resolvers))
-
-#_(def ^:private migrated-dbs (atom {}))
-
-#_(defn pristine-db-connection
-  "Returns a mock Datomic database that has no application schema or data."
-  []
-  (let [client (memdb/client {})
-        db-name (str (gensym "test-database"))
-        _ (log/info "Creating test database" db-name)
-        _ (d/create-database client {:db-name db-name})
-        conn (d/connect client {:db-name db-name})]
-    (ensure-transactor-functions! conn)
-    (d/db conn)))
-
-#_(defn empty-db-connection
-  "Returns a Datomic database that contains the given application schema, but no data.
-   This function must be passed a schema name (keyword).  The optional second parameter
-   is the actual schema to use in the empty database, otherwise automatic generation will be used
-   against RAD attributes. This function memoizes the resulting database for speed.
-
-   See `reset-test-schema`."
-  ([all-attributes schema-name]
-   (empty-db-connection all-attributes schema-name nil))
-  ([all-attributes schema-name txn]
-   (let [h (hash {:id         schema-name
-                  :attributes all-attributes})]
-     (locking migrated-dbs
-       (if-let [db (get @migrated-dbs h)]
-         (do
-           (log/debug "Returning cached test db")
-           (dm/mock-conn db))
-         (let [base-connection (pristine-db-connection)
-               conn            (dm/mock-conn (d/db base-connection))
-               txn             (if (vector? txn) txn (automatic-schema all-attributes schema-name))]
-           (log/debug "Transacting schema: " (with-out-str (pprint txn)))
-           @(d/transact conn txn)
-           (let [db (d/db conn)]
-             (swap! migrated-dbs assoc h db)
-             (dm/mock-conn db))))))))
-
-#_(defn reset-migrated-dbs!
-  "Forget the cached versions of test databases obtained from empty-db-connection."
-  []
-  (reset! migrated-dbs {}))
 
 (defn mock-resolver-env
   "Returns a mock env that has the ::connections and ::databases keys that would be present in
