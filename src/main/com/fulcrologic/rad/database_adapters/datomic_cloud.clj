@@ -9,6 +9,7 @@
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.authorization :as auth]
+    [com.fulcrologic.rad.database-adapters.datomic-common :refer [type-map]]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
@@ -18,27 +19,14 @@
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
     [compute.datomic-client-memdb.core :as memdb]
-    [taoensso.timbre :as log])
+    [taoensso.timbre :as log]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do])
   (:import (java.util UUID)))
 
-(def type-map
-  {:string   :db.type/string
-   :enum     :db.type/ref
-   :boolean  :db.type/boolean
-   :password :db.type/string
-   :int      :db.type/long
-   :long     :db.type/long
-   :decimal  :db.type/bigdec
-   :instant  :db.type/instant
-   :keyword  :db.type/keyword
-   :symbol   :db.type/symbol
-   :tuple    :db.type/tuple
-   :ref      :db.type/ref
-   :uuid     :db.type/uuid})
 
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
-  (let [native-id? #(and (true? (::native-id? %)) (true? (::attr/identity? %)))
+  (let [native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
         native-ids (set (sp/select [sp/ALL native-id? ::attr/qualified-key] all-attributes))]
     (sp/transform (sp/walker keyword?) (fn [k] (if (contains? native-ids k) :db/id k)) pathom-query)))
 
@@ -166,7 +154,7 @@
 (defn native-ident?
   "Returns true if the given ident is using a database native ID (:db/id)"
   [{::attr/keys [key->attribute] :as env} ident]
-  (boolean (some-> ident first key->attribute ::native-id?)))
+  (boolean (some-> ident first key->attribute do/native-id?)))
 
 (defn uuid-ident?
   "Returns true if the ID in the given ident uses UUIDs for ids."
@@ -244,7 +232,7 @@
       delta)))
 
 (defn generate-next-id [{::attr/keys [key->attribute] :as env} k]
-  (let [{::keys      [native-id?]
+  (let [{native-id? do/native-id?
          ::attr/keys [type]} (key->attribute k)]
     (cond
       native-id? nil
@@ -391,7 +379,7 @@
     (doseq [attr all-attributes
             :let [{attr-schema      ::attr/schema
                    attr-cardinality ::attr/cardinality
-                   ::keys           [native-id?]
+                   native-id?       do/native-id?
                    ::attr/keys      [qualified-key type]} attr]]
       (when (and (= attr-schema schema) (not native-id?))
         (log/debug "Checking schema" schema "attribute" qualified-key)
@@ -489,8 +477,8 @@
   [{:keys       [::attr/schema ::id-attribute]
     ::attr/keys [attributes]
     :as         env} input]
-  (let [{::attr/keys [qualified-key]
-         ::keys      [native-id?]} id-attribute
+  (let [{native-id?  do/native-id?
+         ::attr/keys [qualified-key]} id-attribute
         one? (not (sequential? input))]
     (enc/if-let [db           (some-> (get-in env [::databases schema]) deref)
                  query        (get env ::default-query)
@@ -628,4 +616,4 @@
        (deep-merge handler-result local-result))))
   ([]
    (fn [{::form/keys [params] :as pathom-env}]
-     (delete-entity! pathom-env params))))1G
+     (delete-entity! pathom-env params))))

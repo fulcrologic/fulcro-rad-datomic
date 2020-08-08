@@ -3,9 +3,9 @@
     [fulcro-spec.core :refer [specification assertions component behavior when-mocking]]
     [com.fulcrologic.rad.ids :as ids]
     [com.fulcrologic.rad.form :as form]
-    [com.fulcrologic.rad.test-schema-cloud.person :as person]
-    [com.fulcrologic.rad.test-schema-cloud.address :as address]
-    [com.fulcrologic.rad.test-schema-cloud.thing :as thing]
+    [com.fulcrologic.rad.test-schema.person :as person]
+    [com.fulcrologic.rad.test-schema.address :as address]
+    [com.fulcrologic.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
     [fulcro-spec.core :refer [specification assertions]]
     [com.fulcrologic.rad.database-adapters.datomic-cloud :as datomic]
@@ -109,9 +109,9 @@
       (assertions
         "setting boolean false does an add"
         txn => [[:db/add
-                 [:com.fulcrologic.rad.test-schema-cloud.address/id
+                 [:com.fulcrologic.rad.test-schema.address/id
                   #uuid "ffffffff-ffff-ffff-ffff-000000000001"]
-                 :com.fulcrologic.rad.test-schema-cloud.address/enabled?
+                 :com.fulcrologic.rad.test-schema.address/enabled?
                  false]])))
   (let [id    (ids/new-uuid 1)
         delta {[::address/id id] {::address/id       {:before id :after id}
@@ -120,9 +120,9 @@
       (assertions
         "removing boolean false does a retract"
         txn => [[:db/retract
-                 [:com.fulcrologic.rad.test-schema-cloud.address/id
+                 [:com.fulcrologic.rad.test-schema.address/id
                   #uuid "ffffffff-ffff-ffff-ffff-000000000001"]
-                 :com.fulcrologic.rad.test-schema-cloud.address/enabled?
+                 :com.fulcrologic.rad.test-schema.address/enabled?
                  false]]))))
 
 (specification "delta->txn: simple flat delta, existing entity, non-native ID. ADD to-one ATTRIBUTE"
@@ -200,22 +200,22 @@
 (specification "delta->txn: simple flat delta, existing entity, native ID, ADD to-one enum"
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
                                                                ::person/full-name "Bob"}]})
-        delta {[::person/id id] {::person/role {:after :com.fulcrologic.rad.test-schema-cloud.person.role/admin}}}]
+        delta {[::person/id id] {::person/role {:after :com.fulcrologic.rad.test-schema.person.role/admin}}}]
     (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
-        txn => [[:db/add id ::person/role :com.fulcrologic.rad.test-schema-cloud.person.role/admin]]
+        txn => [[:db/add id ::person/role :com.fulcrologic.rad.test-schema.person.role/admin]]
         (runnable? txn) => true))))
 
 (specification "delta->txn: simple flat delta, existing entity, native ID, REMOVE to-one enum"
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
-                                                               ::person/role      :com.fulcrologic.rad.test-schema-cloud.person.role/admin
+                                                               ::person/role      :com.fulcrologic.rad.test-schema.person.role/admin
                                                                ::person/full-name "Bob"}]})
-        delta {[::person/id id] {::person/role {:before :com.fulcrologic.rad.test-schema-cloud.person.role/admin}}}]
+        delta {[::person/id id] {::person/role {:before :com.fulcrologic.rad.test-schema.person.role/admin}}}]
     (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
-        txn => [[:db/retract id ::person/role :com.fulcrologic.rad.test-schema-cloud.person.role/admin]]
+        txn => [[:db/retract id ::person/role :com.fulcrologic.rad.test-schema.person.role/admin]]
         (runnable? txn) => true))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -224,33 +224,33 @@
 
 (specification "delta->txn: simple flat delta, existing entity, non-native ID, UPDATE (ADD) to-many enum"
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id               "id"
-                                                               ::person/permissions [:com.fulcrologic.rad.test-schema-cloud.person.permissions/read
-                                                                                     :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]}]})
-        delta {[::person/id id] {::person/permissions {:before [:com.fulcrologic.rad.test-schema-cloud.person.permissions/read
-                                                                :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]
-                                                       :after  [:com.fulcrologic.rad.test-schema-cloud.person.permissions/read
-                                                                :com.fulcrologic.rad.test-schema-cloud.person.permissions/execute
-                                                                :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]}}}]
+                                                               ::person/permissions [:com.fulcrologic.rad.test-schema.person.permissions/read
+                                                                                     :com.fulcrologic.rad.test-schema.person.permissions/write]}]})
+        delta {[::person/id id] {::person/permissions {:before [:com.fulcrologic.rad.test-schema.person.permissions/read
+                                                                :com.fulcrologic.rad.test-schema.person.permissions/write]
+                                                       :after  [:com.fulcrologic.rad.test-schema.person.permissions/read
+                                                                :com.fulcrologic.rad.test-schema.person.permissions/execute
+                                                                :com.fulcrologic.rad.test-schema.person.permissions/write]}}}]
     (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
-        txn => [[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema-cloud.person.permissions/execute]]
+        txn => [[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/execute]]
         (runnable? txn) => true))))
 
 
 (specification "delta->txn: simple flat delta, existing entity, non-native ID, UPDATE (add/remove) to-many enum"
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id               "id"
-                                                               ::person/permissions [:com.fulcrologic.rad.test-schema-cloud.person.permissions/read
-                                                                                     :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]}]})
-        delta {[::person/id id] {::person/permissions {:before [:com.fulcrologic.rad.test-schema-cloud.person.permissions/read
-                                                                :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]
-                                                       :after  [:com.fulcrologic.rad.test-schema-cloud.person.permissions/execute]}}}]
+                                                               ::person/permissions [:com.fulcrologic.rad.test-schema.person.permissions/read
+                                                                                     :com.fulcrologic.rad.test-schema.person.permissions/write]}]})
+        delta {[::person/id id] {::person/permissions {:before [:com.fulcrologic.rad.test-schema.person.permissions/read
+                                                                :com.fulcrologic.rad.test-schema.person.permissions/write]
+                                                       :after  [:com.fulcrologic.rad.test-schema.person.permissions/execute]}}}]
     (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
-        (set txn) => #{[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema-cloud.person.permissions/execute]
-                       [:db/retract id ::person/permissions :com.fulcrologic.rad.test-schema-cloud.person.permissions/write]
-                       [:db/retract id ::person/permissions :com.fulcrologic.rad.test-schema-cloud.person.permissions/read]}
+        (set txn) => #{[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/execute]
+                       [:db/retract id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/write]
+                       [:db/retract id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/read]}
         (runnable? txn) => true))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -281,12 +281,12 @@
       (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
           "Adds the non-native IDs, and the proper values"
-          (set txn) => #{[:db/add sid2 :com.fulcrologic.rad.test-schema-cloud.address/id new-address-id1]
-                         [:db/add sid3 :com.fulcrologic.rad.test-schema-cloud.address/id new-address-id2]
-                         [:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.person/full-name "Tony"]
-                         [:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.person/primary-address sid2]
-                         [:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.person/addresses sid3]
-                         [:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.person/addresses sid2]}
+          (set txn) => #{[:db/add sid2 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
+                         [:db/add sid3 :com.fulcrologic.rad.test-schema.address/id new-address-id2]
+                         [:db/add sid1 :com.fulcrologic.rad.test-schema.person/full-name "Tony"]
+                         [:db/add sid1 :com.fulcrologic.rad.test-schema.person/primary-address sid2]
+                         [:db/add sid1 :com.fulcrologic.rad.test-schema.person/addresses sid3]
+                         [:db/add sid1 :com.fulcrologic.rad.test-schema.person/addresses sid2]}
           (runnable? txn) => true)))))
 
 (specification "Existing entity, add new to-one child"
@@ -306,8 +306,8 @@
       (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
           "Adds the non-native IDs, and the proper values"
-          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.address/id new-address-id1]
-                         [:db/add id :com.fulcrologic.rad.test-schema-cloud.person/primary-address sid1]
+          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
+                         [:db/add id :com.fulcrologic.rad.test-schema.person/primary-address sid1]
                          [:db/add sid1 ::address/street "B St"]}
           (runnable? txn) => true)))))
 
@@ -331,8 +331,8 @@
           "Includes remappings for new entities"
           tempid->string => {tempid1 sid1}
           "Adds the non-native IDs, and the proper values"
-          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.address/id new-address-id1]
-                         [:db/add id :com.fulcrologic.rad.test-schema-cloud.person/addresses sid1]
+          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
+                         [:db/add id :com.fulcrologic.rad.test-schema.person/addresses sid1]
                          [:db/add sid1 ::address/street "B St"]}
           (runnable? txn) => true)))))
 
@@ -356,9 +356,9 @@
           "Includes remappings for new entities"
           tempid->string => {tempid1 sid1}
           "Adds the non-native IDs, and the proper values"
-          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema-cloud.address/id new-address-id1]
-                         [:db/add id :com.fulcrologic.rad.test-schema-cloud.person/addresses sid1]
-                         [:db/retract id :com.fulcrologic.rad.test-schema-cloud.person/addresses [::address/id (ids/new-uuid 1)]]
+          (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
+                         [:db/add id :com.fulcrologic.rad.test-schema.person/addresses sid1]
+                         [:db/retract id :com.fulcrologic.rad.test-schema.person/addresses [::address/id (ids/new-uuid 1)]]
                          [:db/add sid1 ::address/street "B St"]}
           (runnable? txn) => true)))))
 
@@ -373,7 +373,7 @@
         delta   {[::person/id tempid1]           {::person/id              tempid1
                                                   ::person/full-name       {:after "Bob"}
                                                   ::person/primary-address {:after [::address/id (ids/new-uuid 1)]}
-                                                  ::person/role            :com.fulcrologic.rad.test-schema-cloud.person.role/admin}
+                                                  ::person/role            :com.fulcrologic.rad.test-schema.person.role/admin}
                  [::address/id (ids/new-uuid 1)] {::address/street {:before "A St" :after "A1 St"}}}]
     (let [{:keys [tempids]} (datomic/save-form! *env* {::form/delta delta})
           real-id (get tempids tempid1)
@@ -452,7 +452,7 @@
             temp-address-id (tempid/tempid)
             delta           {[::person/id temp-person-id]
                              {::person/id              {:after temp-person-id}
-                              ::person/role            {:after :com.fulcrologic.rad.test-schema-cloud.person.role/admin}
+                              ::person/role            {:after :com.fulcrologic.rad.test-schema.person.role/admin}
                               ::person/primary-address {:after [::address/id temp-address-id]}}
 
                              [::address/id temp-address-id]
@@ -470,7 +470,7 @@
         (assertions
           "Returns the newly-created graph"
           entity => {::person/id              person-id
-                     ::person/role            :com.fulcrologic.rad.test-schema-cloud.person.role/admin
+                     ::person/role            :com.fulcrologic.rad.test-schema.person.role/admin
                      ::person/primary-address {::address/id     addr-id
                                                ::address/street "A St"}})))))
 

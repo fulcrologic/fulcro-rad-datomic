@@ -9,6 +9,8 @@
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.authorization :as auth]
+    [com.fulcrologic.rad.database-adapters.datomic-common :refer [type-map]]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
@@ -21,26 +23,9 @@
     [taoensso.encore :as enc]
     [taoensso.timbre :as log]))
 
-(def type-map
-  {:boolean  :db.type/boolean
-   :decimal  :db.type/bigdec
-   :double   :db.type/double
-   :enum     :db.type/ref
-   :float    :db.type/float
-   :instant  :db.type/instant
-   :int      :db.type/long
-   :keyword  :db.type/keyword
-   :long     :db.type/long
-   :password :db.type/string
-   :ref      :db.type/ref
-   :string   :db.type/string
-   :symbol   :db.type/symbol
-   :tuple    :db.type/tuple
-   :uuid     :db.type/uuid})
-
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
-  (let [native-id? #(and (true? (::native-id? %)) (true? (::attr/identity? %)))
+  (let [native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
         native-ids (set (sp/select [sp/ALL native-id? ::attr/qualified-key] all-attributes))]
     (sp/transform (sp/walker keyword?) (fn [k] (if (contains? native-ids k) :db/id k)) pathom-query)))
 
@@ -147,7 +132,7 @@
 (defn native-ident?
   "Returns true if the given ident is using a database native ID (:db/id)"
   [{::attr/keys [key->attribute] :as env} ident]
-  (boolean (some-> ident first key->attribute ::native-id?)))
+  (boolean (some-> ident first key->attribute do/native-id?)))
 
 (defn uuid-ident?
   "Returns true if the ID in the given ident uses UUIDs for ids."
