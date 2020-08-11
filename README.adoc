@@ -1,7 +1,9 @@
 = Datomic Database Plugin
 
-This library is currently Alpha and may have out-of-date documentation. Paid support
-can be obtained from http://www.fulcrologic.com[Fulcrologic, LLC].
+This library is may have out-of-date documentation. See the current version of the https://github.com/fulcrologic/fulcro-rad-demo[Fulcro RAD Demo] 
+for an accurate representation of usage.
+
+Paid support can be obtained from http://www.fulcrologic.com[Fulcrologic, LLC].
 
 image:https://img.shields.io/clojars/v/com.fulcrologic/fulcro-rad-datomic.svg[link=https://clojars.org/com.fulcrologic/fulcro-rad-datomic]
 
@@ -49,7 +51,7 @@ during operation.
 === Attribute Facets
 
 Every attribute in the system that is stored in Datomic using this plugin *must* include
-a `::datomic/schema <k>` entry, where `<k>` is a keyword representing a schema name. All attributes
+a `::attr/schema <k>` entry, where `<k>` is a keyword representing a schema name. All attributes
 that share the same schema name will be stored together in a database that has that schema (see
 Selecting a Database During Operation).
 
@@ -60,11 +62,11 @@ override for uniqueness is supplied or the attribute is marked as an `::attr/ide
 `::attr/identity?`:: Causes the attribute to be a unique *identity*. If supplied, then `::attr/unique?` is
 assumed.
 `::attr/cardinality`:: `:one` or `:many` (or you can specify it with normal datomic keys).
+`::attr/schema keyword`:: (required) A name that groups together attributes that go together in a schema
+on a database. A schema can be used on any number of databased (e.g. for sharding).
 
 The plugin-specific attribute parameters are:
 
-`::datomic/schema keyword`:: (required) A name that groups together attributes that go together in a schema
-on a database. A schema can be used on any number of databased (e.g. for sharding).
 `::datomic/native-id?`:: If true it will map the given ID attribute (which must be type long) to `:db/id`.
 `::datomic/entity-ids #{k k2 ...}`:: Required on *non*-identity attributes.
 A set of attribute keys that are `:attr/identity? true`. This
