@@ -15,7 +15,6 @@
     [com.rpl.specter :as sp]
     [com.wsscode.pathom.connect :as pc]
     [com.wsscode.pathom.core :as p]
-    [dev-local-tu.core :as dev_local_tu]
     [datomic.client.api :as d]
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
