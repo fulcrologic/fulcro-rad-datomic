@@ -15,10 +15,10 @@
     [com.rpl.specter :as sp]
     [com.wsscode.pathom.connect :as pc]
     [com.wsscode.pathom.core :as p]
+    [dev-local-tu.core :as dev_local_tu]
     [datomic.client.api :as d]
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
-    [compute.datomic-client-memdb.core :as memdb]
     [taoensso.timbre :as log]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do])
   (:import (java.util UUID)))
@@ -172,10 +172,10 @@
             (log/error qualified-key "for schema" schema "is incorrect in the database, since cardinalities do not match:" (name cardinality) "vs" attr-cardinality)
             (die!)))))))
 
-(defn config->client [{:datomic/keys [client]}]
-  (if (= client :mock)
-    (memdb/client {})
-    (d/client client)))
+(defn config->client [config]
+  (if (= (:datomic/env config) :test)
+    (:datomic/test-client config)
+    (d/client (:datomic/client config))))
 
 (defn ensure-schema!
   ([all-attributes {:datomic/keys [schema] :as config} conn]
@@ -244,12 +244,6 @@
        (assoc m k (start-database! all-attributes v schemas)))
      {}
      (::databases config))))
-
-(defn empty-db-connection [all-attributes schema]
-  (let [mock-config {:datomic/client :mock
-                     :datomic/schema schema
-                     :datomic/database (str (gensym "test-database"))}]
-    (start-database! all-attributes mock-config {})))
 
 (defn entity-query
   [{:keys       [::attr/schema ::id-attribute]
