@@ -1,5 +1,7 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common
   (:require
+    [clojure.set :as set]
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
@@ -59,3 +61,161 @@
       (if (vector? result)
         (mapv #(fix-id-keys k->a children %) result)
         (fix-id-keys k->a children result)))))
+
+(def keys-in-delta
+  (fn keys-in-delta [delta]
+    (let [id-keys  (into #{}
+                     (map first)
+                     (keys delta))
+          all-keys (into id-keys
+                     (mapcat keys)
+                     (vals delta))]
+      all-keys)))
+
+(defn schemas-for-delta [{::attr/keys [key->attribute]} delta]
+  (let [all-keys (keys-in-delta delta)
+        schemas  (into #{}
+                   (keep #(-> % key->attribute ::attr/schema))
+                   all-keys)]
+    schemas))
+
+(defn tempid->intermediate-id [{::attr/keys [key->attribute]} delta]
+  (let [tempids (set (sp/select (sp/walker tempid/tempid?) delta))
+        fulcro-tempid->real-id
+        (into {} (map (fn [t] [t (str (:id t))]) tempids))]
+    fulcro-tempid->real-id))
+
+(defn native-ident?
+  "Returns true if the given ident is using a database native ID (:db/id)"
+  [{::attr/keys [key->attribute] :as env} ident]
+  (boolean (some-> ident first key->attribute do/native-id?)))
+
+(defn uuid-ident?
+  "Returns true if the ID in the given ident uses UUIDs for ids."
+  [{::attr/keys [key->attribute] :as env} ident]
+  (= :uuid (some-> ident first key->attribute ::attr/type)))
+
+(defn failsafe-id
+  "Returns a fail-safe id for the given ident in a transaction. A fail-safe ID will be one of the following:
+  - A long (:db/id) for a pre-existing entity.
+  - A string that stands for a temporary :db/id within the transaction if the id of the ident is temporary.
+  - A lookup ref (the ident itself) if the ID uses a non-native ID, and it is not a tempid.
+  - A keyword if it is a keyword (a :db/ident)
+  "
+  [{::attr/keys [key->attribute] :as env} ident]
+  (if (keyword? ident)
+    ident
+    (let [[_ id] ident]
+      (cond
+        (tempid/tempid? id) (str (:id id))
+        (and (native-ident? env ident) (pos-int? id)) id
+        :otherwise ident))))
+
+(defn to-one? [{::attr/keys [key->attribute]} k]
+  (not (boolean (some-> k key->attribute (attr/to-many?)))))
+
+(defn ref? [{::attr/keys [key->attribute]} k]
+  (= :ref (some-> k key->attribute ::attr/type)))
+
+(defn schema-value? [{::attr/keys [key->attribute]} target-schema k]
+  (let [{:keys       [::attr/schema]
+         ::attr/keys [identity?]} (key->attribute k)]
+    (and (= schema target-schema) (not identity?))))
+
+(defn tx-value
+  "Convert `v` to a transaction-safe value based on its type and cardinality."
+  [env k v] (if (ref? env k) (failsafe-id env v) v))
+
+(defn to-one-txn [env schema delta]
+  (vec
+    (mapcat
+      (fn [[ident entity-delta]]
+        (reduce
+          (fn [tx [k {:keys [before after]}]]
+            (if (and (schema-value? env schema k) (to-one? env k))
+              (cond
+                (not (nil? after)) (conj tx [:db/add (failsafe-id env ident) k (tx-value env k after)])
+                (not (nil? before)) (conj tx [:db/retract (failsafe-id env ident) k (tx-value env k before)])
+                :else tx)
+              tx))
+          []
+          entity-delta))
+      delta)))
+
+(defn to-many-txn [env schema delta]
+  (vec
+    (mapcat
+      (fn [[ident entity-delta]]
+        (reduce
+          (fn [tx [k {:keys [before after]}]]
+            (if (and (schema-value? env schema k) (not (to-one? env k)))
+              (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
+                    after   (into #{} (map (fn [v] (tx-value env k v))) after)
+                    adds    (map
+                              (fn [v] [:db/add (failsafe-id env ident) k v])
+                              (set/difference after before))
+                    removes (map
+                              (fn [v] [:db/retract (failsafe-id env ident) k v])
+                              (set/difference before after))]
+                (into tx (concat adds removes)))
+              tx))
+          []
+          entity-delta))
+      delta)))
+
+(defn squuid []
+  "Sequential UUID
+  Implementation taken from https://github.com/clojure-cookbook/clojure-cookbook/blob/master/01_primitive-data/1-24_uuids.asciidoc#discussion"
+  (let [uuid (java.util.UUID/randomUUID)
+        time (System/currentTimeMillis)
+        secs (quot time 1000)
+        lsb (.getLeastSignificantBits uuid)
+        msb (.getMostSignificantBits uuid)
+        timed-msb (bit-or (bit-shift-left secs 32)
+                    (bit-and 0x00000000ffffffff msb))]
+    (java.util.UUID. timed-msb lsb)))
+
+(defn next-uuid [] (squuid))
+
+(defn generate-next-id
+  "Generate an id. You may pass a `suggested-id` as a UUID or a tempid. If it is a tempid and the ID column is a UUID, then
+  the UUID *from* the tempid will be used. If the ID column is not a UUID then the suggested id is ignored. Returns nil for
+  native ID columns."
+  ([{::attr/keys [key->attribute] :as env} k]
+   (generate-next-id env k (next-uuid)))
+  ([{::attr/keys [key->attribute] :as env} k suggested-id]
+   (let [{::keys      [native-id?]
+          ::attr/keys [type]} (key->attribute k)]
+     (cond
+       native-id? nil
+       (= :uuid type) (cond
+                        (tempid/tempid? suggested-id) (:id suggested-id)
+                        (uuid? suggested-id) suggested-id
+                        :else (next-uuid))
+       :otherwise (throw (ex-info "Cannot generate an ID for non-native ID attribute" {:attribute k}))))))
+
+(defn tempids->generate-ids [{::attr/keys [key->attribute] :as env} delta]
+  (let [idents (keys delta)
+        fulcro-tempid->generated-id
+        (into {} (keep (fn [[k id :as ident]]
+                         (when (and (tempid/tempid? id) (not (native-ident? env ident)))
+                           [id (generate-next-id env k)])) idents))]
+    fulcro-tempid->generated-id))
+
+(>defn delta->txn
+  [env schema delta]
+  [map? keyword? map? => map?]
+  (let [tempid->txid                 (tempid->intermediate-id env delta)
+        tempid->generated-id         (tempids->generate-ids env delta)
+        non-native-id-attributes-txn (keep
+                                       (fn [[k id :as ident]]
+                                         (when (and (tempid/tempid? id) (uuid-ident? env ident))
+                                           [:db/add (tempid->txid id) k (tempid->generated-id id)]))
+                                       (keys delta))]
+    {:tempid->string       tempid->txid
+     :tempid->generated-id tempid->generated-id
+     :txn                  (into []
+                             (concat
+                               non-native-id-attributes-txn
+                               (to-one-txn env schema delta)
+                               (to-many-txn env schema delta)))}))

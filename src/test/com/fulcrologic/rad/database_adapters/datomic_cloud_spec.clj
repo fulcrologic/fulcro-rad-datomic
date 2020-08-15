@@ -37,31 +37,7 @@
 
 (use-fixtures :each with-env)
 
-(specification "intermediate ID generation"
-  (let [id1    (tempid/tempid (ids/new-uuid 1))
-        id2    (tempid/tempid (ids/new-uuid 2))
-        delta  {[::person/id id1]  {::person/id        {:after id1}
-                                    ::person/addresses {:after [[::address/id id2]]}}
-                [::address/id id2] {::address/id     {:after id2}
-                                    ::address/street {:after "111 Main St"}}}
-        tmp->m (datomic/tempid->intermediate-id *env* delta)]
-    (assertions
-      "creates a map from tempid to a string"
-      (get tmp->m id1) => "ffffffff-ffff-ffff-ffff-000000000001"
-      (get tmp->m id2) => "ffffffff-ffff-ffff-ffff-000000000002")))
-
-(specification "fail-safe ID"
-  (let [id1 (ids/new-uuid 1)
-        tid (tempid/tempid id1)]
-    (assertions
-      "is the Datomic :db/id when using native IDs"
-      (datomic/failsafe-id *env* [::person/id 42]) => 42
-      "is the ident when using custom IDs that are not temporary"
-      (datomic/failsafe-id *env* [::address/id (ids/new-uuid 1)]) => [::address/id (ids/new-uuid 1)]
-      "is a string-version of the tempid when the id of the ident is a tempid"
-      (datomic/failsafe-id *env* [::person/id tid]) => "ffffffff-ffff-ffff-ffff-000000000001"
-      (datomic/failsafe-id *env* [::address/id tid]) => "ffffffff-ffff-ffff-ffff-000000000001")))
-
+; TODO -- refactor to testing util?
 (defn runnable? [txn]
   (try
     (d/transact *conn* {:tx-data txn})
@@ -76,7 +52,7 @@
         delta           {[::address/id id1] {::address/id     {:after id1}
                                              ::address/street {:after "111 Main St"}}}]
     (when-mocking
-      (datomic/next-uuid) => expected-new-id
+      (common/next-uuid) => expected-new-id
 
       (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
@@ -276,8 +252,8 @@
                          [::address/id tempid3] {::address/id     {:after tempid3}
                                                  ::address/street "B St"}}]
     (when-mocking
-      (datomic/next-uuid) =1x=> new-address-id1
-      (datomic/next-uuid) =1x=> new-address-id2
+      (common/next-uuid) =1x=> new-address-id1
+      (common/next-uuid) =1x=> new-address-id2
 
       (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
@@ -302,7 +278,7 @@
                          [::address/id tempid1] {::address/id     {:after tempid1}
                                                  ::address/street {:after "B St"}}}]
     (when-mocking
-      (datomic/next-uuid) =1x=> new-address-id1
+      (common/next-uuid) =1x=> new-address-id1
 
       (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
@@ -325,7 +301,7 @@
                          [::address/id tempid1] {::address/id     {:after tempid1}
                                                  ::address/street {:after "B St"}}}]
     (when-mocking
-      (datomic/next-uuid) =1x=> new-address-id1
+      (common/next-uuid) =1x=> new-address-id1
 
       (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
@@ -350,7 +326,7 @@
                          [::address/id tempid1] {::address/id     {:after tempid1}
                                                  ::address/street {:after "B St"}}}]
     (when-mocking
-      (datomic/next-uuid) =1x=> new-address-id1
+      (common/next-uuid) =1x=> new-address-id1
 
       (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
         (assertions
