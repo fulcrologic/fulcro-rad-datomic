@@ -9,7 +9,7 @@
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.authorization :as auth]
-    [com.fulcrologic.rad.database-adapters.datomic-common :refer [type-map]]
+    [com.fulcrologic.rad.database-adapters.datomic-common :as common :refer [type-map]]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
@@ -23,45 +23,6 @@
     [com.fulcrologic.rad.database-adapters.datomic-options :as do])
   (:import (java.util UUID)))
 
-
-(>defn pathom-query->datomic-query [all-attributes pathom-query]
-  [::attr/attributes ::eql/query => ::eql/query]
-  (let [native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
-        native-ids (set (sp/select [sp/ALL native-id? ::attr/qualified-key] all-attributes))]
-    (sp/transform (sp/walker keyword?) (fn [k] (if (contains? native-ids k) :db/id k)) pathom-query)))
-
-(defn- fix-id-keys
-  "Fix the ID keys recursively on result."
-  [k->a ast-nodes result]
-  (let [id?                (fn [{:keys [dispatch-key]}] (some-> dispatch-key k->a ::attr/identity?))
-        id-key             (:key (sp/select-first [sp/ALL id?] ast-nodes))
-        join-key->children (into {}
-                             (comp
-                               (filter #(= :join (:type %)))
-                               (map (fn [{:keys [key children]}] [key children])))
-                             ast-nodes)
-        join-keys          (set (keys join-key->children))
-        join-key?          #(contains? join-keys %)]
-    (reduce-kv
-      (fn [m k v]
-        (cond
-          (= :db/id k) (assoc m id-key v)
-          (and (join-key? k) (vector? v)) (assoc m k (mapv #(fix-id-keys k->a (join-key->children k) %) v))
-          (and (join-key? k) (map? v)) (assoc m k (fix-id-keys k->a (join-key->children k) v))
-          :otherwise (assoc m k v)))
-      {}
-      result)))
-
-(>defn datomic-result->pathom-result
-  "Convert a datomic result containing :db/id into a pathom result containing the proper id keyword that was used
-   in the original query."
-  [k->a pathom-query result]
-  [(s/map-of keyword? ::attr/attribute) ::eql/query (? coll?) => (? coll?)]
-  (when result
-    (let [{:keys [children]} (eql/query->ast pathom-query)]
-      (if (vector? result)
-        (mapv #(fix-id-keys k->a children %) result)
-        (fix-id-keys k->a children result)))))
 
 ;; FIXME: There should be a client API query that runs on startup to find idents so that this is more efficient and also so we don't use the entity API.
 (defn replace-ref-types
@@ -511,7 +472,7 @@
   (log/info "Building ID resolver for" qualified-key)
   (enc/if-let [_          id-attribute
                outputs    (attr/attributes->eql output-attributes)
-               pull-query (pathom-query->datomic-query all-attributes outputs)]
+               pull-query (common/pathom-query->datomic-query all-attributes outputs)]
     (let [resolve-sym      (symbol
                              (str (namespace qualified-key))
                              (str (name qualified-key) "-resolver"))
@@ -531,7 +492,7 @@
                                        ::id-attribute id-attribute
                                        ::default-query pull-query)
                                      input)
-                                (datomic-result->pathom-result key->attribute outputs)
+                                (common/datomic-result->pathom-result key->attribute outputs)
                                 (auth/redact env)))
                       wrap-resolve (wrap-resolve)
                       :always (with-resolve-sym))
