@@ -89,24 +89,6 @@
   [db ids db-idents desired-output]
   (pull-* db desired-output db-idents ids))
 
-(>defn delta->txn
-  [env schema delta]
-  [map? keyword? map? => map?]
-  (let [tempid->txid                 (common/tempid->intermediate-id env delta)
-        tempid->generated-id         (common/tempids->generate-ids env delta)
-        non-native-id-attributes-txn (keep
-                                       (fn [[k id :as ident]]
-                                         (when (and (tempid/tempid? id) (common/uuid-ident? env ident))
-                                           [:db/add (tempid->txid id) k (tempid->generated-id id)]))
-                                       (keys delta))]
-    {:tempid->string       tempid->txid
-     :tempid->generated-id tempid->generated-id
-     :txn                  (into []
-                             (concat
-                               non-native-id-attributes-txn
-                               (common/to-one-txn env schema delta)
-                               (common/to-many-txn env schema delta)))}))
-
 (defn save-form!
   "Do all of the possible Datomic operations for the given form delta (save to all Datomic databases involved)"
   [env {::form/keys [delta] :as save-params}]
@@ -162,52 +144,6 @@
   ;; TODO - need to identify these for Cloud
   ["shadow.cljs.devtools.server.worker.impl"])
 
-(defn- attribute-schema [attributes]
-  (mapv
-    (fn [{::attr/keys [identity? type qualified-key cardinality]
-          ::keys      [attribute-schema] :as a}]
-      (let [overrides    (select-keys-in-ns a "db")
-            datomic-type (get type-map type)]
-        (when-not datomic-type
-          (throw (ex-info (str "No mapping from attribute type to Datomic: " type) {})))
-        (merge
-          (cond-> {:db/ident       qualified-key
-                   :db/cardinality (if (= :many cardinality)
-                                     :db.cardinality/many
-                                     :db.cardinality/one)
-                   :db/valueType   datomic-type}
-            (map? attribute-schema) (merge attribute-schema)
-            identity? (assoc :db/unique :db.unique/identity))
-          overrides)))
-    attributes))
-
-(defn- enumerated-values [attributes]
-  (mapcat
-    (fn [{::attr/keys [qualified-key type enumerated-values] :as a}]
-      (when (= :enum type)
-        (let [enum-nspc (str (namespace qualified-key) "." (name qualified-key))]
-          (keep (fn [v]
-                  (cond
-                    (map? v) v
-                    (qualified-keyword? v) {:db/ident v}
-                    :otherwise (let [enum-ident (keyword enum-nspc (name v))]
-                                 {:db/ident enum-ident})))
-            enumerated-values))))
-    attributes))
-
-(>defn automatic-schema
-  "Returns a Datomic transaction for the complete schema of the supplied RAD `attributes`
-   that have a `::datomic/schema` that matches `schema-name`."
-  [attributes schema-name]
-  [::attr/attributes keyword? => vector?]
-  (let [attributes (filter #(= schema-name (::attr/schema %)) attributes)]
-    (when (empty? attributes)
-      (log/warn "Automatic schema requested, but the attribute list is empty. No schema will be generated!"))
-    (let [txn (attribute-schema attributes)
-          txn (into txn (enumerated-values attributes))]
-      txn)))
-
-
 (>defn verify-schema!
   "Validate that a database supports then named `schema`. This function finds all attributes
   that are declared on the schema, and checks that the Datomic representation of them
@@ -247,7 +183,7 @@
   ([all-attributes {:datomic/keys [schema] :as config} schemas conn]
    (let [generator (get schemas schema :auto)]
      (cond
-       (= :auto generator) (let [txn (automatic-schema all-attributes schema)]
+       (= :auto generator) (let [txn (common/automatic-schema all-attributes schema)]
                              (log/info "Transacting automatic schema.")
                              (log/debug "Schema:\n" (with-out-str (pprint txn)))
                              (d/transact conn {:tx-data txn}))

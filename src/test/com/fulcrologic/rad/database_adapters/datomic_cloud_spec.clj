@@ -45,22 +45,17 @@
     (catch Exception e
       (.getMessage e))))
 
-(specification "delta->txn: simple flat delta, new entity, non-native ID. CREATE"
-  (let [id1             (tempid/tempid (ids/new-uuid 1))
-        expected-new-id (ids/new-uuid 2)
-        str-id          (str (:id id1))
-        delta           {[::address/id id1] {::address/id     {:after id1}
-                                             ::address/street {:after "111 Main St"}}}]
-    (when-mocking
-      (common/next-uuid) => expected-new-id
-
-      (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
-        (assertions
-          "includes tempid temporary mapping"
-          (get tempid->string id1) => "ffffffff-ffff-ffff-ffff-000000000001"
-          "Includes an add for the specific facts changed"
-          txn => [[:db/add str-id ::address/id expected-new-id]
-                  [:db/add str-id ::address/street "111 Main St"]])))))
+(specification "fail-safe ID"
+  (let [id1 (ids/new-uuid 1)
+        tid (tempid/tempid id1)]
+    (assertions
+      "is the Datomic :db/id when using native IDs"
+      (common/failsafe-id *env* [::person/id 42]) => 42
+      "is the ident when using custom IDs that are not temporary"
+      (common/failsafe-id *env* [::address/id (ids/new-uuid 1)]) => [::address/id (ids/new-uuid 1)]
+      "is a string-version of the tempid when the id of the ident is a tempid"
+      (common/failsafe-id *env* [::person/id tid]) => "ffffffff-ffff-ffff-ffff-000000000001"
+      (common/failsafe-id *env* [::address/id tid]) => "ffffffff-ffff-ffff-ffff-000000000001")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; To-one
@@ -72,7 +67,7 @@
                                              ::address/street "111 Main"}]})
         delta {[::address/id id] {::address/id     {:before id :after id}
                                   ::address/street {:before "111 Main" :after "111 Main St"}}}]
-    (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->string txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->string) => true
@@ -82,7 +77,7 @@
   (let [id    (ids/new-uuid 1)
         delta {[::address/id id] {::address/id       {:before id :after id}
                                   ::address/enabled? {:before nil :after false}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "setting boolean false does an add"
         txn => [[:db/add
@@ -93,7 +88,7 @@
   (let [id    (ids/new-uuid 1)
         delta {[::address/id id] {::address/id       {:before id :after id}
                                   ::address/enabled? {:before false :after nil}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "removing boolean false does a retract"
         txn => [[:db/retract
@@ -106,7 +101,7 @@
   (let [id    (ids/new-uuid 1)
         _     (d/transact *conn* {:tx-data [{::address/id (ids/new-uuid 1)}]})
         delta {[::address/id id] {::address/street {:after "111 Main St"}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes lookup refs for the non-native ID, and changes for the facts that changed"
         txn => [[:db/add [::address/id id] ::address/street "111 Main St"]]
@@ -118,7 +113,7 @@
                                              ::address/street "111 Main"}]})
         delta {[::address/id id] {::address/id     {:before id :after id}
                                   ::address/street {:before "111 Main" :after nil}}}]
-    (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->string txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->string) => true
@@ -131,7 +126,7 @@
         str-id (str (:id id1))
         delta  {[::person/id id1] {::person/id    {:after id1}
                                    ::person/email {:after "joe@nowhere.com"}}}]
-    (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->string txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "includes tempid temporary mapping"
         (get tempid->string id1) => "ffffffff-ffff-ffff-ffff-000000000001"
@@ -143,7 +138,7 @@
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
                                                                ::person/full-name "Bob"}]})
         delta {[::person/id id] {::person/email {:after "joe@nowhere.net"}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/add id ::person/email "joe@nowhere.net"]]
@@ -153,7 +148,7 @@
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
                                                                ::person/full-name "Bob"}]})
         delta {[::person/id id] {::person/full-name {:before "Bob" :after "Bobby"}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/add id ::person/full-name "Bobby"]]
@@ -163,7 +158,7 @@
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
                                                                ::person/full-name "Bob"}]})
         delta {[::person/id id] {::person/full-name {:before "Bob"}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/retract id ::person/full-name "Bob"]]
@@ -178,7 +173,7 @@
   (let [{{:strs [id]} :tempids} (d/transact *conn* {:tx-data [{:db/id             "id"
                                                                ::person/full-name "Bob"}]})
         delta {[::person/id id] {::person/role {:after :com.fulcrologic.rad.test-schema.person.role/admin}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/add id ::person/role :com.fulcrologic.rad.test-schema.person.role/admin]]
@@ -189,7 +184,7 @@
                                                                ::person/role      :com.fulcrologic.rad.test-schema.person.role/admin
                                                                ::person/full-name "Bob"}]})
         delta {[::person/id id] {::person/role {:before :com.fulcrologic.rad.test-schema.person.role/admin}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/retract id ::person/role :com.fulcrologic.rad.test-schema.person.role/admin]]
@@ -208,7 +203,7 @@
                                                        :after  [:com.fulcrologic.rad.test-schema.person.permissions/read
                                                                 :com.fulcrologic.rad.test-schema.person.permissions/execute
                                                                 :com.fulcrologic.rad.test-schema.person.permissions/write]}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         txn => [[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/execute]]
@@ -222,7 +217,7 @@
         delta {[::person/id id] {::person/permissions {:before [:com.fulcrologic.rad.test-schema.person.permissions/read
                                                                 :com.fulcrologic.rad.test-schema.person.permissions/write]
                                                        :after  [:com.fulcrologic.rad.test-schema.person.permissions/execute]}}}]
-    (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         (set txn) => #{[:db/add id ::person/permissions :com.fulcrologic.rad.test-schema.person.permissions/execute]
@@ -255,7 +250,7 @@
       (common/next-uuid) =1x=> new-address-id1
       (common/next-uuid) =1x=> new-address-id2
 
-      (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+      (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
         (assertions
           "Adds the non-native IDs, and the proper values"
           (set txn) => #{[:db/add sid2 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
@@ -280,7 +275,7 @@
     (when-mocking
       (common/next-uuid) =1x=> new-address-id1
 
-      (let [{:keys [txn]} (datomic/delta->txn *env* :production delta)]
+      (let [{:keys [txn]} (common/delta->txn *env* :production delta)]
         (assertions
           "Adds the non-native IDs, and the proper values"
           (set txn) => #{[:db/add sid1 :com.fulcrologic.rad.test-schema.address/id new-address-id1]
@@ -303,7 +298,7 @@
     (when-mocking
       (common/next-uuid) =1x=> new-address-id1
 
-      (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
+      (let [{:keys [tempid->string txn]} (common/delta->txn *env* :production delta)]
         (assertions
           "Includes remappings for new entities"
           tempid->string => {tempid1 sid1}
@@ -328,7 +323,7 @@
     (when-mocking
       (common/next-uuid) =1x=> new-address-id1
 
-      (let [{:keys [tempid->string txn]} (datomic/delta->txn *env* :production delta)]
+      (let [{:keys [tempid->string txn]} (common/delta->txn *env* :production delta)]
         (assertions
           "Includes remappings for new entities"
           tempid->string => {tempid1 sid1}

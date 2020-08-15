@@ -5,8 +5,10 @@
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
+    [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
-    [edn-query-language.core :as eql]))
+    [edn-query-language.core :as eql]
+    [taoensso.timbre :as log]))
 
 (def type-map
   {:string   :db.type/string
@@ -32,15 +34,15 @@
 (defn- fix-id-keys
   "Fix the ID keys recursively on result."
   [k->a ast-nodes result]
-  (let [id?                (fn [{:keys [dispatch-key]}] (some-> dispatch-key k->a ::attr/identity?))
-        id-key             (:key (sp/select-first [sp/ALL id?] ast-nodes))
+  (let [id? (fn [{:keys [dispatch-key]}] (some-> dispatch-key k->a ::attr/identity?))
+        id-key (:key (sp/select-first [sp/ALL id?] ast-nodes))
         join-key->children (into {}
                              (comp
                                (filter #(= :join (:type %)))
                                (map (fn [{:keys [key children]}] [key children])))
                              ast-nodes)
-        join-keys          (set (keys join-key->children))
-        join-key?          #(contains? join-keys %)]
+        join-keys (set (keys join-key->children))
+        join-key? #(contains? join-keys %)]
     (reduce-kv
       (fn [m k v]
         (cond
@@ -64,9 +66,9 @@
 
 (def keys-in-delta
   (fn keys-in-delta [delta]
-    (let [id-keys  (into #{}
-                     (map first)
-                     (keys delta))
+    (let [id-keys (into #{}
+                    (map first)
+                    (keys delta))
           all-keys (into id-keys
                      (mapcat keys)
                      (vals delta))]
@@ -74,9 +76,9 @@
 
 (defn schemas-for-delta [{::attr/keys [key->attribute]} delta]
   (let [all-keys (keys-in-delta delta)
-        schemas  (into #{}
-                   (keep #(-> % key->attribute ::attr/schema))
-                   all-keys)]
+        schemas (into #{}
+                  (keep #(-> % key->attribute ::attr/schema))
+                  all-keys)]
     schemas))
 
 (defn tempid->intermediate-id [{::attr/keys [key->attribute]} delta]
@@ -149,11 +151,11 @@
         (reduce
           (fn [tx [k {:keys [before after]}]]
             (if (and (schema-value? env schema k) (not (to-one? env k)))
-              (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
-                    after   (into #{} (map (fn [v] (tx-value env k v))) after)
-                    adds    (map
-                              (fn [v] [:db/add (failsafe-id env ident) k v])
-                              (set/difference after before))
+              (let [before (into #{} (map (fn [v] (tx-value env k v))) before)
+                    after (into #{} (map (fn [v] (tx-value env k v))) after)
+                    adds (map
+                           (fn [v] [:db/add (failsafe-id env ident) k v])
+                           (set/difference after before))
                     removes (map
                               (fn [v] [:db/retract (failsafe-id env ident) k v])
                               (set/difference before after))]
@@ -184,7 +186,7 @@
   ([{::attr/keys [key->attribute] :as env} k]
    (generate-next-id env k (next-uuid)))
   ([{::attr/keys [key->attribute] :as env} k suggested-id]
-   (let [{::keys      [native-id?]
+   (let [{native-id?  :com.fulcrologic.rad.database-adapters.datomic/native-id?
           ::attr/keys [type]} (key->attribute k)]
      (cond
        native-id? nil
@@ -194,7 +196,7 @@
                         :else (next-uuid))
        :otherwise (throw (ex-info "Cannot generate an ID for non-native ID attribute" {:attribute k}))))))
 
-(defn tempids->generate-ids [{::attr/keys [key->attribute] :as env} delta]
+(defn tempids->generated-ids [{::attr/keys [key->attribute] :as env} delta]
   (let [idents (keys delta)
         fulcro-tempid->generated-id
         (into {} (keep (fn [[k id :as ident]]
@@ -205,8 +207,8 @@
 (>defn delta->txn
   [env schema delta]
   [map? keyword? map? => map?]
-  (let [tempid->txid                 (tempid->intermediate-id env delta)
-        tempid->generated-id         (tempids->generate-ids env delta)
+  (let [tempid->txid (tempid->intermediate-id env delta)
+        tempid->generated-id (tempids->generated-ids env delta)
         non-native-id-attributes-txn (keep
                                        (fn [[k id :as ident]]
                                          (when (and (tempid/tempid? id) (uuid-ident? env ident))
@@ -219,3 +221,48 @@
                                non-native-id-attributes-txn
                                (to-one-txn env schema delta)
                                (to-many-txn env schema delta)))}))
+
+(defn- attribute-schema [attributes]
+  (mapv
+    (fn [{::attr/keys [identity? type qualified-key cardinality]
+          ::keys      [attribute-schema] :as a}]
+      (let [overrides    (select-keys-in-ns a "db")
+            datomic-type (get type-map type)]
+        (when-not datomic-type
+          (throw (ex-info (str "No mapping from attribute type to Datomic: " type) {})))
+        (merge
+          (cond-> {:db/ident       qualified-key
+                   :db/cardinality (if (= :many cardinality)
+                                     :db.cardinality/many
+                                     :db.cardinality/one)
+                   :db/valueType   datomic-type}
+            (map? attribute-schema) (merge attribute-schema)
+            identity? (assoc :db/unique :db.unique/identity))
+          overrides)))
+    attributes))
+
+(defn- enumerated-values [attributes]
+  (mapcat
+    (fn [{::attr/keys [qualified-key type enumerated-values] :as a}]
+      (when (= :enum type)
+        (let [enum-nspc (str (namespace qualified-key) "." (name qualified-key))]
+          (keep (fn [v]
+                  (cond
+                    (map? v) v
+                    (qualified-keyword? v) {:db/ident v}
+                    :otherwise (let [enum-ident (keyword enum-nspc (name v))]
+                                 {:db/ident enum-ident})))
+            enumerated-values))))
+    attributes))
+
+(>defn automatic-schema
+  "Returns a Datomic transaction for the complete schema of the supplied RAD `attributes`
+   that have a `::datomic/schema` that matches `schema-name`."
+  [attributes schema-name]
+  [::attr/attributes keyword? => vector?]
+  (let [attributes (filter #(= schema-name (::attr/schema %)) attributes)]
+    (when (empty? attributes)
+      (log/warn "Automatic schema requested, but the attribute list is empty. No schema will be generated!"))
+    (let [txn (attribute-schema attributes)
+          txn (into txn (enumerated-values attributes))]
+      txn)))
