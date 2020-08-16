@@ -1,5 +1,6 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common
   (:require
+    [clojure.spec.alpha :as s]
     [clojure.set :as set]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
