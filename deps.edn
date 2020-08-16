@@ -26,7 +26,7 @@
 
            :provided  {:extra-deps {com.datomic/datomic-free {:mvn/version "0.9.5697"
                                                               :exclusions  [org.slf4j/slf4j-nop]}
-                                    com.datomic/client-cloud {:mvn/version "0.8.81"}
+                                    com.datomic/client-cloud {:mvn/version "0.8.102"}
                                     }}
 
            :dev       {:extra-paths ["src/dev" "resources"]

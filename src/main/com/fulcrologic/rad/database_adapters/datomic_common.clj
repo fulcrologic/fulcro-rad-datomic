@@ -224,9 +224,9 @@
 
 (defn- attribute-schema [attributes]
   (mapv
-    (fn [{::attr/keys [identity? type qualified-key cardinality]
-          ::keys      [attribute-schema] :as a}]
-      (let [overrides    (select-keys-in-ns a "db")
+    (fn [{::attr/keys [identity? type qualified-key cardinality] :as a}]
+      (let [attribute-schema (do/attribute-schema a)
+            overrides (select-keys-in-ns a "db")
             datomic-type (get type-map type)]
         (when-not datomic-type
           (throw (ex-info (str "No mapping from attribute type to Datomic: " type) {})))
