@@ -16,8 +16,7 @@
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
     [taoensso.timbre :as log]
-    [com.fulcrologic.rad.database-adapters.datomic-options :as do])
-  (:import (java.util UUID)))
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]))
 
 
 ;; FIXME: There should be a client API query that runs on startup to find idents so that this is more efficient and also so we don't use the entity API.
