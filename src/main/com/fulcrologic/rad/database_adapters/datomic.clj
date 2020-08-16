@@ -1,10 +1,7 @@
 (ns com.fulcrologic.rad.database-adapters.datomic
   (:require
-    [clojure.spec.alpha :as s]
-    [clojure.set :as set]
     [clojure.walk :as walk]
     [clojure.pprint :refer [pprint]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.fulcro.algorithms.do-not-use :refer [deep-merge]]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
