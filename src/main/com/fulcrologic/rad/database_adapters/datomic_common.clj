@@ -9,7 +9,8 @@
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
     [edn-query-language.core :as eql]
-    [taoensso.timbre :as log]))
+    [taoensso.timbre :as log])
+  (:import (java.util UUID)))
 
 (def type-map
   {:string   :db.type/string
@@ -166,19 +167,7 @@
           entity-delta))
       delta)))
 
-(defn squuid []
-  "Sequential UUID
-  Implementation taken from https://github.com/clojure-cookbook/clojure-cookbook/blob/master/01_primitive-data/1-24_uuids.asciidoc#discussion"
-  (let [uuid (java.util.UUID/randomUUID)
-        time (System/currentTimeMillis)
-        secs (quot time 1000)
-        lsb (.getLeastSignificantBits uuid)
-        msb (.getMostSignificantBits uuid)
-        timed-msb (bit-or (bit-shift-left secs 32)
-                    (bit-and 0x00000000ffffffff msb))]
-    (java.util.UUID. timed-msb lsb)))
-
-(defn next-uuid [] (squuid))
+(defn next-uuid [] (UUID/randomUUID))
 
 (defn generate-next-id
   "Generate an id. You may pass a `suggested-id` as a UUID or a tempid. If it is a tempid and the ID column is a UUID, then

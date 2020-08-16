@@ -15,7 +15,8 @@
     [com.fulcrologic.rad.pathom :as pathom]
     [taoensso.timbre :as log]
     [datomic.api :as d]
-    [clojure.set :as set]))
+    [clojure.set :as set]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]))
 
 (declare =>)
 
@@ -36,7 +37,7 @@
   (let [conn (datomic/empty-db-connection all-attributes :production)]
     (binding [*conn* conn
               *env* {::attr/key->attribute key->attribute
-                     ::datomic/connections {:production conn}}]
+                     do/connections        {:production conn}}]
       (tests))))
 
 (use-fixtures :once with-reset-database)

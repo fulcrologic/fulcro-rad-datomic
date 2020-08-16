@@ -15,7 +15,8 @@
     [com.fulcrologic.rad.pathom :as pathom]
     [dev-local-tu.core :as dev-local-tu]
     [datomic.client.api :as d]
-    [taoensso.timbre :as log]))
+    [taoensso.timbre :as log]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]))
 
 (declare =>)
 
@@ -38,7 +39,7 @@
           conn (datomic/start-database! all-attributes config {})]
       (binding [*conn* conn
                 *env* {::attr/key->attribute key->attribute
-                       ::datomic/connections {:production conn}}]
+                       do/connections        {:production conn}}]
         (tests)))))
 
 (use-fixtures :each with-env)

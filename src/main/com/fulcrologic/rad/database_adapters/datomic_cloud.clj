@@ -95,7 +95,7 @@
         result  (atom {:tempids {}})]
     (log/debug "Saving form across " schemas)
     (doseq [schema schemas
-            :let [connection (-> env ::connections (get schema))
+            :let [connection (-> env do/connections (get schema))
                   {:keys [tempid->string
                           tempid->generated-id
                           txn]} (common/delta->txn env schema delta)]]
@@ -104,7 +104,7 @@
       (log/debug "Running txn\n" (with-out-str (pprint txn)))
       (if (and connection (seq txn))
         (try
-          (let [database-atom   (get-in env [::databases schema])
+          (let [database-atom   (get-in env [do/databases schema])
                 {:keys [tempids] :as tx-result} (d/transact connection {:tx-data txn})
                 tempid->real-id (into {}
                                   (map (fn [tempid] [tempid (get tempid->generated-id tempid
@@ -126,11 +126,11 @@
                id         (get params pk)
                ident      [pk id]
                {:keys [::attr/schema]} (key->attribute pk)
-               connection (-> env ::connections (get schema))
+               connection (-> env do/connections (get schema))
                txn        [[:db/retractEntity ident]]]
     (do
       (log/info "Deleting" ident)
-      (let [database-atom (get-in env [::databases schema])]
+      (let [database-atom (get-in env [do/databases schema])]
         (d/transact connection {:tx-data txn})
         (when database-atom
           (reset! database-atom (d/db connection)))
@@ -217,14 +217,14 @@
 
 (defn start-databases
   "Start all of the databases described in config, using the schemas defined in schemas.
-  * `config`:  a map that contains the key ::datomic/databases.
+  * `config`:  a map that contains the key `do/databases`.
   * `schemas`:  a map whose keys are schema names, and whose values can be missing (or :auto) for
   automatic schema generation, a `(fn [schema-name conn] ...)` that updates the schema for schema-name
   on the database reachable via `conn`. You may omit `schemas` if automatic generation is being used
   everywhere.
   WARNING: Be sure all of your model files are required before running this function, since it
   will use the attribute definitions during startup.
-  The `::datomic/databases` entry in the config is a map with the following form:
+  The `do/databases` entry in the config is a map with the following form:
   ```
   {:production-shard-1 {:datomic/schema :production
                         :datomic/client  {<client config map; see Datomic Cloud docs>}
@@ -242,7 +242,7 @@
        (log/info "Starting database " k)
        (assoc m k (start-database! all-attributes v schemas)))
      {}
-     (::databases config))))
+     (do/databases config))))
 
 (defn entity-query
   [{:keys       [::attr/schema ::id-attribute]
@@ -251,7 +251,7 @@
   (let [{native-id?  do/native-id?
          ::attr/keys [qualified-key]} id-attribute
         one? (not (sequential? input))]
-    (enc/if-let [db           (some-> (get-in env [::databases schema]) deref)
+    (enc/if-let [db           (some-> (get-in env [do/databases schema]) deref)
                  query        (get env ::default-query)
                  ids          (if one?
                                 [(get input qualified-key)]
@@ -336,22 +336,22 @@
     entity-resolvers))
 
 (defn mock-resolver-env
-  "Returns a mock env that has the ::connections and ::databases keys that would be present in
+  "Returns a mock env that has the do/connections and do/databases keys that would be present in
   a properly-set-up pathom resolver `env` for a given single schema. This should be called *after*
   you have seeded data against a `connection` that goes with the given schema.
   * `schema` - A schema name
   * `connection` - A database connection that is connected to a database with that schema."
   [schema connection]
-  {::connections {schema connection}
-   ::databases   {schema (atom (d/db connection))}})
+  {do/connections {schema connection}
+   do/databases   {schema (atom (d/db connection))}})
 
 (defn pathom-plugin
   "A pathom plugin that adds the necessary Datomic connections and databases to the pathom env for
   a given request. Requires a database-mapper, which is a
   `(fn [pathom-env] {schema-name connection})` for a given request.
   The resulting pathom-env available to all resolvers will then have:
-  - `::datomic/connections`: The result of database-mapper
-  - `::datomic/databases`: A map from schema name to atoms holding a database. The atom is present so that
+  - `do/connections`: The result of database-mapper
+  - `do/databases` A map from schema name to atoms holding a database. The atom is present so that
   a mutation that modifies the database can choose to update the snapshot of the db being used for the remaining
   resolvers.
   This plugin should run before (be listed after) most other plugins in the plugin chain since
@@ -363,8 +363,8 @@
       (let [database-connection-map (database-mapper env)
             databases               (sp/transform [sp/MAP-VALS] (fn [v] (atom (d/db v))) database-connection-map)]
         (assoc env
-          ::connections database-connection-map
-          ::databases databases)))))
+          do/connections database-connection-map
+          do/databases databases)))))
 
 (defn wrap-datomic-save
   "Form save middleware to accomplish Datomic saves."
