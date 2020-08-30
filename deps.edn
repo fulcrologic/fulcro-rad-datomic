@@ -10,8 +10,6 @@
            vvvvalvalval/datomock      {:mvn/version "0.2.2"}
            org.clojure/clojure        {:mvn/version "1.10.1"}}
 
-
-
  :aliases {:test      {:extra-paths ["src/test"]
                        :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.5"}
                                      dev-local-tu            {:mvn/version "0.1.0"}
