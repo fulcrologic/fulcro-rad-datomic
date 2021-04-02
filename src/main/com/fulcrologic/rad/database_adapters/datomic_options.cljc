@@ -24,10 +24,6 @@
     a map from schema->database at this key path"
   :com.fulcrologic.rad.database-adapters.datomic/databases)
 
-(def default-query
-  "Used in pathom env. Sets a default query to use for pulls when there is no pattern found."
-  :com.fulcrologic.rad.database-adapters.datomic/default-query)
-
 (def wrap-resolve
   "Identity Attribute option. A `(fn [resolve])` that must return a `(fn [env input])`. The `resolve` is the core
    resolving logic (a function of env/input), so the returned function can manipulate the resolver inputs and outputs.
