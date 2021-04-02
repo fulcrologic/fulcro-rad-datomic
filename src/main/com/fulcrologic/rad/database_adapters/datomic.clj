@@ -242,34 +242,19 @@
                                                               (str (second ident)))]
                                                 [[:db/add eid rel ref-val]]))})}]))
 
-(>defn verify-schema!
+(defn verify-schema!
   "Validate that a database supports then named `schema`. This function finds all attributes
   that are declared on the schema, and checks that the Datomic representation of them
   meets minimum requirements for desired operation.
-
   This function throws an exception if a problem is found, and can be used in
   applications that manage their own schema to ensure that the database will
   operate correctly in RAD."
   [db schema all-attributes]
-  [any? keyword? ::attr/attributes => any?]
-  (let [die! #(throw (ex-info "Validation Failed" {:schema schema}))]
-    (doseq [attr all-attributes
-            :let [{attr-schema      ::attr/schema
-                   attr-cardinality ::attr/cardinality
-                   ::keys           [native-id?]
-                   ::attr/keys      [qualified-key type]} attr]]
-      (when (and (= attr-schema schema) (not native-id?))
-        (log/debug "Checking schema" schema "attribute" qualified-key)
-        (let [{:db/keys [cardinality valueType]} (d/pull db '[{:db/cardinality [:db/ident]} {:db/valueType [:db/ident]}] qualified-key)
-              cardinality (get cardinality :db/ident :one)
-              db-type     (get valueType :db/ident :unknown)]
-          (when (not= (get type-map type) db-type)
-            (log/error qualified-key "for schema" schema "is incorrect in the database. It has type" valueType
-              "but was expected to have type" (get type-map type))
-            (die!))
-          (when (not= (name cardinality) (name (or attr-cardinality :one)))
-            (log/error qualified-key "for schema" schema "is incorrect in the database, since cardinalities do not match:" (name cardinality) "vs" attr-cardinality)
-            (die!)))))))
+  (let [problems (common/schema-problems db schema all-attributes d/pull)]
+    (when (seq problems)
+      (doseq [p problems]
+        (log/error p))
+      (throw (ex-info "Validation Failed" {:schema schema})))))
 
 (defn start-database!
   "Starts a Datomic database connection given the standard sub-element config described

@@ -1,12 +1,13 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-cloud
   (:require
-    [clojure.walk :as walk]
     [clojure.pprint :refer [pprint]]
+    [clojure.walk :as walk]
     [com.fulcrologic.fulcro.algorithms.do-not-use :refer [deep-merge]]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.authorization :as auth]
     [com.fulcrologic.rad.database-adapters.datomic-common :as common :refer [type-map]]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.rpl.specter :as sp]
@@ -15,8 +16,7 @@
     [datomic.client.api :as d]
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
-    [taoensso.timbre :as log]
-    [com.fulcrologic.rad.database-adapters.datomic-options :as do]))
+    [taoensso.timbre :as log]))
 
 (defn ref-entity->ident [db {:db/keys [ident id] :as ent}]
   (cond
@@ -148,7 +148,7 @@
   ;; TODO - need to identify these for Cloud
   ["shadow.cljs.devtools.server.worker.impl"])
 
-(>defn verify-schema!
+(defn verify-schema!
   "Validate that a database supports then named `schema`. This function finds all attributes
   that are declared on the schema, and checks that the Datomic representation of them
   meets minimum requirements for desired operation.
@@ -156,25 +156,11 @@
   applications that manage their own schema to ensure that the database will
   operate correctly in RAD."
   [db schema all-attributes]
-  [any? keyword? ::attr/attributes => any?]
-  (let [die! #(throw (ex-info "Validation Failed" {:schema schema}))]
-    (doseq [attr all-attributes
-            :let [{attr-schema      ::attr/schema
-                   attr-cardinality ::attr/cardinality
-                   native-id?       do/native-id?
-                   ::attr/keys      [qualified-key type]} attr]]
-      (when (and (= attr-schema schema) (not native-id?))
-        (log/debug "Checking schema" schema "attribute" qualified-key)
-        (let [{:db/keys [cardinality valueType]} (d/pull db '[{:db/cardinality [:db/ident]} {:db/valueType [:db/ident]}] qualified-key)
-              cardinality (get cardinality :db/ident :one)
-              db-type     (get valueType :db/ident :unknown)]
-          (when (not= (get type-map type) db-type)
-            (log/error qualified-key "for schema" schema "is incorrect in the database. It has type" valueType
-              "but was expected to have type" (get type-map type))
-            (die!))
-          (when (not= (name cardinality) (name (or attr-cardinality :one)))
-            (log/error qualified-key "for schema" schema "is incorrect in the database, since cardinalities do not match:" (name cardinality) "vs" attr-cardinality)
-            (die!)))))))
+  (let [problems (common/schema-problems db schema all-attributes d/pull)]
+    (when (seq problems)
+      (doseq [p problems]
+        (log/error p))
+      (throw (ex-info "Validation Failed" {:schema schema})))))
 
 (defn config->client [config]
   (if (= (:datomic/env config) :test)
@@ -182,14 +168,15 @@
     (d/client (:datomic/client config))))
 
 (defn ensure-schema!
-  ([all-attributes {:datomic/keys [schema] :as config} conn]
+  ([all-attributes {:datomic/keys [verbose? schema] :as config} conn]
    (ensure-schema! all-attributes config {} conn))
-  ([all-attributes {:datomic/keys [schema] :as config} schemas conn]
+  ([all-attributes {:datomic/keys [schema verbose?] :as config} schemas conn]
    (let [generator (get schemas schema :auto)]
      (cond
        (= :auto generator) (let [txn (common/automatic-schema all-attributes schema)]
                              (log/info "Transacting automatic schema.")
-                             (log/debug "Generated Schema:\n" (with-out-str (pprint txn)))
+                             (when verbose?
+                               (log/debug "Generated Schema:\n" (with-out-str (pprint txn))))
                              (d/transact conn {:tx-data txn}))
        (ifn? generator) (do
                           (log/info "Running custom schema function.")

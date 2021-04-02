@@ -1,7 +1,7 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common
   (:require
-    [clojure.spec.alpha :as s]
     [clojure.set :as set]
+    [clojure.spec.alpha :as s]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
@@ -259,3 +259,34 @@
     (let [txn (attribute-schema attributes)
           txn (into txn (enumerated-values attributes))]
       txn)))
+
+(defn schema-problems
+  "Validate that a database supports then named `schema`, and return any problems that are found.
+
+   This function finds all attributes that are declared on the schema, and checks that the Datomic representation of them
+  meets minimum requirements for desired operation. This function returns a list of problems found, and can be used in
+  applications that manage their own schema to ensure that the database will operate correctly in RAD.
+
+  The `pull` argument is the pull function to use against Datomic, which is either the client or on-prem version of pull."
+  [db schema all-attributes pull]
+  (reduce
+    (fn [problems attr]
+      (let [{attr-schema      ::attr/schema
+             attr-cardinality ::attr/cardinality
+             native-id?       do/native-id?
+             ::attr/keys      [qualified-key type]} attr]
+        (if (and (= attr-schema schema) (not native-id?))
+          (let [{:db/keys [cardinality valueType]} (pull db '[{:db/cardinality [:db/ident]}
+                                                              {:db/valueType [:db/ident]}] qualified-key)
+                cardinality (get cardinality :db/ident :one)
+                db-type     (get valueType :db/ident :unknown)]
+            (cond-> problems
+
+              (not= (get type-map type) db-type)
+              (conj (str qualified-key " has type " db-type " but was expected to have type " (get type-map type)))
+
+              (not= (name cardinality) (name (or attr-cardinality :one)))
+              (conj (str qualified-key "'s cardinality does not match."))))
+          problems)))
+    []
+    all-attributes))
