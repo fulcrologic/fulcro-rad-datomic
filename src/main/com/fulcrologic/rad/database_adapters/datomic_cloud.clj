@@ -98,15 +98,15 @@
   [env {::form/keys [delta] :as save-params}]
   (let [schemas (common/schemas-for-delta env delta)
         result  (atom {:tempids {}})]
-    (log/debug "Saving form across " schemas)
     (doseq [schema schemas
             :let [connection (-> env do/connections (get schema))
                   {:keys [tempid->string
                           tempid->generated-id
                           txn]} (common/delta->txn env schema delta)]]
-      (log/debug "Saving form delta" (with-out-str (pprint delta)))
-      (log/debug "on schema" schema)
-      (log/debug "Running txn\n" (with-out-str (pprint txn)))
+      (when (log/may-log? :trace)
+        (log/trace "Saving form delta" (with-out-str (pprint delta)))
+        (log/trace "on schema" schema)
+        (log/trace "Running txn\n" (with-out-str (pprint txn))))
       (if (and connection (seq txn))
         (try
           (let [database-atom   (get-in env [do/databases schema])
@@ -167,17 +167,14 @@
     (:datomic/test-client config)
     (d/client (:datomic/client config))))
 
-(defn ensure-schema!
-  ([all-attributes {:datomic/keys [verbose? schema] :as config} conn]
+(defn ^:deprecated ensure-schema!
+  "Use common/ensure-schema! instead."
+  ([all-attributes config conn]
    (ensure-schema! all-attributes config {} conn))
-  ([all-attributes {:datomic/keys [schema verbose?] :as config} schemas conn]
+  ([all-attributes {:datomic/keys [schema] :as config} schemas conn]
    (let [generator (get schemas schema :auto)]
      (cond
-       (= :auto generator) (let [txn (common/automatic-schema all-attributes schema)]
-                             (log/info "Transacting automatic schema.")
-                             (when verbose?
-                               (log/debug "Generated Schema:\n" (with-out-str (pprint txn))))
-                             (d/transact conn {:tx-data txn}))
+       (= :auto generator) (common/ensure-schema! (fn [c txn] (d/transact c {:tx-data txn})) conn schema all-attributes)
        (ifn? generator) (do
                           (log/info "Running custom schema function.")
                           (generator conn))
@@ -196,9 +193,10 @@
   (let [client (config->client config)
         _      (d/create-database client {:db-name database})
         conn   (d/connect client {:db-name database})]
-    (ensure-schema! all-attributes config schemas conn)
+    (when (= :auto (get schemas schema :auto))
+      (common/ensure-schema! (fn [c txn] (d/transact c {:tx-data txn})) conn schema all-attributes))
     (verify-schema! (d/db conn) schema all-attributes)
-    (log/info "Finished connecting to and migrating database.")
+    (log/info "Finished connecting to and migrating database for" schema)
     conn))
 
 (defn adapt-external-database!
@@ -257,7 +255,7 @@
                                          (::attr/qualified-key %)))
                                 attributes)]
       (do
-        (log/info "Running" query "on entities with " qualified-key ":" ids)
+        (log/trace "Running" query "on entities with " qualified-key ":" ids)
         (let [result (get-by-ids db ids enumerations query)]
           (if one?
             (first result)

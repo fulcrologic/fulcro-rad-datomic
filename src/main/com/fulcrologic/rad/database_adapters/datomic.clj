@@ -283,10 +283,7 @@
     (log/info "Adding form save support to database transactor functions.")
     (ensure-transactor-functions! conn)
     (cond
-      (= :auto generator) (let [txn (common/automatic-schema all-attributes schema)]
-                            (log/info "Transacting automatic schema.")
-                            (log/debug "Schema:\n" (with-out-str (pprint txn)))
-                            @(d/transact conn txn))
+      (= :auto generator) (common/ensure-schema! d/transact conn schema all-attributes)
       (ifn? generator) (do
                          (log/info "Running custom schema function.")
                          (generator conn))

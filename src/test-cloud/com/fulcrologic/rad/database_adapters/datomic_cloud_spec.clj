@@ -2,7 +2,7 @@
   (:require
     [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [com.fulcrologic.rad.attributes :as attr]
+    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
     [com.fulcrologic.rad.database-adapters.datomic-cloud :as datomic]
     [com.fulcrologic.rad.database-adapters.datomic-common :as common]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
@@ -19,7 +19,13 @@
 
 (declare =>)
 
-(def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
+(defattr composite-tuple ::person/name+email :tuple
+  {::attr/identities   #{::person/id}
+   ::attr/schema       :production
+   do/attribute-schema {:db/tupleAttrs [::person/full-name ::person/email]}})
+
+
+(def all-attributes (vec (concat person/attributes [composite-tuple] address/attributes thing/attributes)))
 (def key->attribute (into {}
                       (map (fn [{::attr/keys [qualified-key] :as a}]
                              [qualified-key a]))
@@ -49,6 +55,13 @@
     true
     (catch Exception e
       (.getMessage e))))
+
+(specification "Schema generation"
+  (let [db (d/db *conn*)]
+    (assertions
+      "is able to generate schema composite tuples"
+      (d/pull db '[:db/tupleAttrs] ::person/name+email) => {:db/tupleAttrs [:com.fulcrologic.rad.test-schema.person/full-name
+                                                                            :com.fulcrologic.rad.test-schema.person/email]})))
 
 (specification "fail-safe ID"
   (let [id1 (ids/new-uuid 1)
@@ -460,7 +473,4 @@
     (component "defattr applies ::pc/transform to the resolver map"
       (assertions
         "person resolver has been transformed by ::pc/transform"
-        (do
-          (log/spy :info person-resolver)
-          (::person/transform-succeeded person-resolver)) => true
-        ))))
+        (::person/transform-succeeded person-resolver) => true))))

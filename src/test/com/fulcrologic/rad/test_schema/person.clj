@@ -9,9 +9,7 @@
    do/native-id?    true
    ::attr/schema    :production
    ::pc/transform   (fn [resolver]
-                      (assoc resolver ::transform-succeeded true))
-
-   })
+                      (assoc resolver ::transform-succeeded true))})
 
 (defattr full-name ::full-name :string
   {::attr/schema     :production
@@ -52,4 +50,4 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
-(def attributes [id full-name email primary-address addresses role permissions])
+(def attributes [id full-name email primary-address addresses role permissions ])

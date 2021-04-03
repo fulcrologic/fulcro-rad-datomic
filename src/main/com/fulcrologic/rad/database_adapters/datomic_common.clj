@@ -1,5 +1,6 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common
   (:require
+    [clojure.pprint :refer [pprint]]
     [clojure.set :as set]
     [clojure.spec.alpha :as s]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
@@ -290,3 +291,28 @@
           problems)))
     []
     all-attributes))
+
+(defn ensure-schema!
+  "Ensure that the schema for the given attributes exists in the datomic database of the connection `conn`.
+
+  * `transact` - The transact function to use in order to run a transaction. MUST BE a `(fn [c tx])` (on-prem style).
+  * `conn` - The datomic connection.
+  * `schema-name` - Only attributes matching the given schema name will be transacted.
+  * `attributes` - The attributes to ensure. Auto-filters attributes that do not match `schema-name`, and also does
+    Tuples in a separate transaction to ensure composite tuples can succeed.
+
+  See `verify-schema!` and `schema-problems` for validation functions on hand-managed schema.
+  "
+  [transact conn schema-name attributes]
+  (let [{tuple-attrs   true
+         regular-attrs false} (group-by (fn [{::attr/keys [type]}] (= :tuple type)) attributes)
+        non-tuple-txn (automatic-schema regular-attrs schema-name)
+        tuple-txn     (when (seq tuple-attrs)
+                        (automatic-schema tuple-attrs schema-name))]
+    (log/debug "Transacting automatic schema.")
+    (when (log/may-log? :trace)
+      (log/trace "Generated Schema:\n" (with-out-str (pprint non-tuple-txn)))
+      (when tuple-txn (log/trace "Tuple Schema:\n" (with-out-str (pprint tuple-txn)))))
+    (transact conn (vec non-tuple-txn))
+    (when tuple-txn
+      (transact conn (vec tuple-txn)))))
