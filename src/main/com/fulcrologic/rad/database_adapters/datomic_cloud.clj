@@ -94,8 +94,10 @@
   (pull-* db desired-output db-idents ids))
 
 (defn save-form!
-  "Do all of the possible Datomic operations for the given form delta (save to all Datomic databases involved)"
-  [env {::form/keys [delta] :as save-params}]
+  "Do all of the possible Datomic operations for the given form delta (save to all
+   Datomic databases involved). If you include `:datomic/transact` in the `env`, then
+   that function will be used to transact datoms instead of the default (Datomic) function."
+  [{:datomic/keys [transact] :as env} {::form/keys [delta] :as save-params}]
   (let [schemas (common/schemas-for-delta env delta)
         result  (atom {:tempids {}})]
     (doseq [schema schemas
@@ -110,7 +112,8 @@
       (if (and connection (seq txn))
         (try
           (let [database-atom   (get-in env [do/databases schema])
-                {:keys [tempids] :as tx-result} (d/transact connection {:tx-data txn})
+                tx!             (or transact d/transact)
+                {:keys [tempids] :as tx-result} (tx! connection {:tx-data txn})
                 tempid->real-id (into {}
                                   (map (fn [tempid] [tempid (get tempid->generated-id tempid
                                                               (get tempids (tempid->string tempid)))]))
@@ -125,8 +128,11 @@
     @result))
 
 (defn delete-entity!
-  "Delete the given entity, if possible."
-  [{::attr/keys [key->attribute] :as env} params]
+  "Delete the given entity, if possible. `env` should contain the normal datomic middleware
+   elements, and can also include `:datomic/transact` to override the function that is used
+   to transact datoms."
+  [{:datomic/keys [transact]
+    ::attr/keys   [key->attribute] :as env} params]
   (enc/if-let [pk         (ffirst params)
                id         (get params pk)
                ident      [pk id]
@@ -135,8 +141,9 @@
                txn        [[:db/retractEntity ident]]]
     (do
       (log/info "Deleting" ident)
-      (let [database-atom (get-in env [do/databases schema])]
-        (d/transact connection {:tx-data txn})
+      (let [database-atom (get-in env [do/databases schema])
+            tx!           (or transact d/transact)]
+        (tx! connection {:tx-data txn})
         (when database-atom
           (reset! database-atom (d/db connection)))
         {}))
@@ -360,7 +367,14 @@
           do/databases databases)))))
 
 (defn wrap-datomic-save
-  "Form save middleware to accomplish Datomic saves."
+  "Form save middleware to accomplish Datomic saves.
+
+   `handler` - Another middleware function to chain
+   `addl-env` - Static (constant) things to add to the pathom-env on every call. Built-in
+   support uses:
+   ** `:datomic/transact` - The function to call to transact datoms. Overrides the normal Datomic transact
+      and is useful for augmenting the behavior.
+   "
   ([]
    (fn [{::form/keys [params] :as pathom-env}]
      (let [save-result (save-form! pathom-env params)]
@@ -369,14 +383,33 @@
    (fn [{::form/keys [params] :as pathom-env}]
      (let [save-result    (save-form! pathom-env params)
            handler-result (handler pathom-env)]
+       (deep-merge save-result handler-result))))
+  ([handler addl-env]
+   (fn [{::form/keys [params] :as pathom-env}]
+     (let [env            (merge addl-env pathom-env)
+           save-result    (save-form! env params)
+           handler-result (handler env)]
        (deep-merge save-result handler-result)))))
 
 (defn wrap-datomic-delete
-  "Form delete middleware to accomplish datomic deletes."
+  "Form delete middleware to accomplish datomic deletes.
+
+   `handler` - Another middleware function to chain
+   `addl-env` - Static (constant) things to add to the pathom-env on every call. Built-in
+   support uses:
+   ** `:datomic/transact` - The function to call to transact datoms. Overrides the normal Datomic transact
+      and is useful for augmenting the behavior.
+  "
   ([handler]
    (fn [{::form/keys [params] :as pathom-env}]
      (let [local-result   (delete-entity! pathom-env params)
            handler-result (handler pathom-env)]
+       (deep-merge handler-result local-result))))
+  ([handler addl-env]
+   (fn [{::form/keys [params] :as pathom-env}]
+     (let [env            (merge addl-env pathom-env)
+           local-result   (delete-entity! env params)
+           handler-result (handler env)]
        (deep-merge handler-result local-result))))
   ([]
    (fn [{::form/keys [params] :as pathom-env}]

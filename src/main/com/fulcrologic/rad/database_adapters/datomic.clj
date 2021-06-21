@@ -73,7 +73,7 @@
 
 (defn save-form!
   "Do all of the possible Datomic operations for the given form delta (save to all Datomic databases involved)"
-  [env {::form/keys [delta] :as save-params}]
+  [{:datomic/keys [transact] :as env} {::form/keys [delta] :as save-params}]
   (let [schemas (common/schemas-for-delta env delta)
         result  (atom {:tempids {}})]
     (log/debug "Saving form across " schemas)
@@ -88,6 +88,7 @@
       (if (and connection (seq txn))
         (try
           (let [database-atom   (get-in env [do/databases schema])
+                tx!             (or transact d/transact)
                 {:keys [tempids]} @(d/transact connection txn)
                 tempid->real-id (into {}
                                   (map (fn [tempid] [tempid (get tempid->generated-id tempid
@@ -104,7 +105,8 @@
 
 (defn delete-entity!
   "Delete the given entity, if possible."
-  [{::attr/keys [key->attribute] :as env} params]
+  [{:datomic/keys [transact]
+    ::attr/keys   [key->attribute] :as env} params]
   (enc/if-let [pk         (ffirst params)
                id         (get params pk)
                ident      [pk id]
@@ -113,7 +115,8 @@
                txn        [[:db/retractEntity ident]]]
     (do
       (log/info "Deleting" ident)
-      (let [database-atom (get-in env [do/databases schema])]
+      (let [database-atom (get-in env [do/databases schema])
+            tx!           (or transact d/transact)]
         @(d/transact connection txn)
         (when database-atom
           (reset! database-atom (d/db connection)))
