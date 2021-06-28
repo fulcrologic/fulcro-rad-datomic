@@ -8,6 +8,7 @@
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
+    [com.fulcrologic.rad.type-support.decimal :as math]
     [com.rpl.specter :as sp]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log])
@@ -130,9 +131,25 @@
          ::attr/keys [identity?]} (key->attribute k)]
     (and (= schema target-schema) (not identity?))))
 
+(defn fix-numerics
+  "Using field types double and float can cause anomolies with Datomic because js might send an int when the number has
+   no decimal digits."
+  [{::attr/keys [type]} v]
+  (case type
+    :double (double v)
+    :float (double v)
+    :numeric (math/numeric v)
+    :int (long v)
+    :long (long v)
+    v))
+
 (defn tx-value
   "Convert `v` to a transaction-safe value based on its type and cardinality."
-  [env k v] (if (ref? env k) (failsafe-id env v) v))
+  [{::attr/keys [key->attribute] :as env} k v]
+  (if (ref? env k)
+    (failsafe-id env v)
+    (let [attr (key->attribute k)]
+      (fix-numerics attr v))))
 
 (defn to-one-txn [env schema delta]
   (vec
