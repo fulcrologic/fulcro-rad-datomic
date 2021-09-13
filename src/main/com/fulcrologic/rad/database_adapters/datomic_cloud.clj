@@ -274,14 +274,15 @@
 (>defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
   [all-attributes
-   {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve ::pc/transform] :as id-attribute}
+   {::attr/keys [qualified-key] :keys [::attr/schema ::pc/transform] :as id-attribute}
    output-attributes]
   [::attr/attributes ::attr/attribute ::attr/attributes => ::pc/resolver]
   (log/info "Building ID resolver for" qualified-key)
   (enc/if-let [_          id-attribute
                outputs    (attr/attributes->eql output-attributes)
                pull-query (common/pathom-query->datomic-query all-attributes outputs)]
-    (let [resolve-sym      (symbol
+    (let [wrap-resolve     (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
+          resolve-sym      (symbol
                              (str (namespace qualified-key))
                              (str (name qualified-key) "-resolver"))
           with-resolve-sym (fn [r]
