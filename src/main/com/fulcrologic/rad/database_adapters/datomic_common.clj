@@ -24,6 +24,7 @@
    :double   :db.type/double
    :float    :db.type/float
    :bigdec   :db.type/bigdec
+   :bigint   :db.type/bigint
    :decimal  :db.type/bigdec
    :instant  :db.type/instant
    :keyword  :db.type/keyword
