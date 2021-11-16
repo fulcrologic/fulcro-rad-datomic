@@ -10,9 +10,6 @@
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
-    [com.rpl.specter :as sp]
-    [com.wsscode.pathom.connect :as pc]
-    [com.wsscode.pathom.core :as p]
     [datomic.client.api :as d]
     [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
@@ -271,12 +268,11 @@
         (log/info "Unable to complete query.")
         nil))))
 
-(>defn id-resolver
+(defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
   [all-attributes
-   {::attr/keys [qualified-key] :keys [::attr/schema ::pc/transform] :as id-attribute}
+   {::attr/keys [qualified-key] :keys [::attr/schema :com.wsscode.pathom.connect/transform] :as id-attribute}
    output-attributes]
-  [::attr/attributes ::attr/attribute ::attr/attributes => ::pc/resolver]
   (log/info "Building ID resolver for" qualified-key)
   (enc/if-let [_          id-attribute
                outputs    (attr/attributes->eql output-attributes)
@@ -287,26 +283,25 @@
                              (str (name qualified-key) "-resolver"))
           with-resolve-sym (fn [r]
                              (fn [env input]
-                               (r (assoc env ::pc/sym resolve-sym) input)))]
+                               (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
       (log/debug "Computed output is" outputs)
       (log/debug "Datomic pull query to derive output is" pull-query)
-      (cond-> {::pc/sym     resolve-sym
-               ::pc/output  outputs
-               ::pc/batch?  true
-               ::pc/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                                      (->> (entity-query
-                                             (assoc env
-                                               ::attr/schema schema
-                                               ::attr/attributes output-attributes
-                                               ::id-attribute id-attribute
-                                               ::default-query pull-query)
-                                             input)
-                                        (common/datomic-result->pathom-result key->attribute outputs)
-                                        (auth/redact env)))
-                              wrap-resolve (wrap-resolve)
-                              :always (with-resolve-sym))
-               ::pc/input   #{qualified-key}
-               }
+      (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
+               :com.wsscode.pathom.connect/output  outputs
+               :com.wsscode.pathom.connect/batch?  true
+               :com.wsscode.pathom.connect/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
+                                                             (->> (entity-query
+                                                                    (assoc env
+                                                                      ::attr/schema schema
+                                                                      ::attr/attributes output-attributes
+                                                                      ::id-attribute id-attribute
+                                                                      ::default-query pull-query)
+                                                                    input)
+                                                               (common/datomic-result->pathom-result key->attribute outputs)
+                                                               (auth/redact env)))
+                                                     wrap-resolve (wrap-resolve)
+                                                     :always (with-resolve-sym))
+               :com.wsscode.pathom.connect/input   #{qualified-key}}
         transform transform))
     (do
       (log/error "Unable to generate id-resolver. "
@@ -346,8 +341,10 @@
   {do/connections {schema connection}
    do/databases   {schema (atom (d/db connection))}})
 
-(defn pathom-plugin
-  "A pathom plugin that adds the necessary Datomic connections and databases to the pathom env for
+(defn ^:deprecated pathom-plugin
+  "Use datomic-common/pathom-plugin or wrap-env, depending on Pathom version.
+
+  A pathom plugin that adds the necessary Datomic connections and databases to the pathom env for
   a given request. Requires a database-mapper, which is a
   `(fn [pathom-env] {schema-name connection})` for a given request.
   The resulting pathom-env available to all resolvers will then have:
@@ -359,13 +356,7 @@
   it adds connection details to the parsing env.
   "
   [database-mapper]
-  (p/env-wrap-plugin
-    (fn [env]
-      (let [database-connection-map (database-mapper env)
-            databases               (sp/transform [sp/MAP-VALS] (fn [v] (atom (d/db v))) database-connection-map)]
-        (assoc env
-          do/connections database-connection-map
-          do/databases databases)))))
+  (common/pathom-plugin database-mapper d/db))
 
 (defn wrap-datomic-save
   "Form save middleware to accomplish Datomic saves.

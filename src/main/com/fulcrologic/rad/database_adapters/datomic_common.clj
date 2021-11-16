@@ -11,7 +11,8 @@
     [com.fulcrologic.rad.type-support.decimal :as math]
     [com.rpl.specter :as sp]
     [edn-query-language.core :as eql]
-    [taoensso.timbre :as log])
+    [taoensso.timbre :as log]
+    [taoensso.encore :as enc])
   (:import (java.util UUID)))
 
 (def type-map
@@ -334,3 +335,47 @@
     (transact conn (vec non-tuple-txn))
     (when tuple-txn
       (transact conn (vec tuple-txn)))))
+
+
+(defn wrap-env
+  "Build a (fn [env] env') that adds RAD datomic support to an env. If `base-wrapper` is supplied, then it will be called
+   as part of the evaluation, allowing you to build up a chain of environment middleware.
+
+   See attributes/wrap-env for more information.
+   "
+  ([database-mapper connection->db] (wrap-env nil database-mapper connection->db))
+  ([base-wrapper database-mapper connection->db]
+   (fn [env]
+     (cond-> (let [database-connection-map (database-mapper env)
+                   databases               (enc/map-vals (fn [connection] (atom (connection->db connection))) database-connection-map)]
+               (assoc env
+                 do/connections database-connection-map
+                 do/databases databases))
+       base-wrapper (base-wrapper)))))
+
+(defn pathom-plugin
+  "A pathom 2 plugin that adds the necessary Datomic connections and databases to the pathom env for
+  a given request. Requires a database-mapper, which is a
+  `(fn [pathom-env] {schema-name connection})` for a given request.
+
+  See `wrap-env` for Pathom 3.
+
+  The `connection->db` argument is the proper Datomic API `d/db` function (client or on-prem).
+
+  The resulting pathom-env available to all resolvers will then have:
+
+  - `do/connections`: The result of database-mapper
+  - `do/databases`: A map from schema name to atoms holding a database. The atom is present so that
+  a mutation that modifies the database can choose to update the snapshot of the db being used for the remaining
+  resolvers.
+
+  This plugin should run before (be listed after) most other plugins in the plugin chain since
+  it adds connection details to the parsing env.
+  "
+  [database-mapper connection->db]
+  (let [augment (wrap-env database-mapper connection->db)]
+    {:com.wsscode.pathom.core/wrap-parser
+     (fn env-wrap-wrap-parser [parser]
+       (fn env-wrap-wrap-internal [env tx]
+         (parser (augment env) tx)))}))
+
