@@ -3,13 +3,13 @@
     [clojure.pprint :refer [pprint]]
     [clojure.set :as set]
     [clojure.spec.alpha :as s]
+    [clojure.walk :as walk]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [com.fulcrologic.rad.type-support.decimal :as math]
-    [com.rpl.specter :as sp]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log]
     [taoensso.encore :as enc])
@@ -37,14 +37,21 @@
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
   (let [native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
-        native-ids (set (sp/select [sp/ALL native-id? ::attr/qualified-key] all-attributes))]
-    (sp/transform (sp/walker keyword?) (fn [k] (if (contains? native-ids k) :db/id k)) pathom-query)))
+        native-ids (into #{}
+                     (comp
+                       (filter native-id?)
+                       (map ::attr/qualified-key))
+                     all-attributes)]
+    (walk/prewalk (fn [e]
+                    (if (and (keyword? e) (contains? native-ids e))
+                      :db/id
+                      e)) pathom-query)))
 
 (defn- fix-id-keys
   "Fix the ID keys recursively on result."
   [k->a ast-nodes result]
   (let [id?                (fn [{:keys [dispatch-key]}] (some-> dispatch-key k->a ::attr/identity?))
-        id-key             (:key (sp/select-first [sp/ALL id?] ast-nodes))
+        id-key             (:key (first (filter id? ast-nodes)))
         join-key->children (into {}
                              (comp
                                (filter #(= :join (:type %)))
@@ -90,10 +97,14 @@
                    all-keys)]
     schemas))
 
-(defn tempid->intermediate-id [{::attr/keys [key->attribute]} delta]
-  (let [tempids (set (sp/select (sp/walker tempid/tempid?) delta))
+(defn tempid->intermediate-id [env delta]
+  (let [tempids (volatile! #{})
+        _       (walk/prewalk (fn [e]
+                                (when (tempid/tempid? e)
+                                  (vswap! tempids conj e))
+                                e) delta)
         fulcro-tempid->real-id
-                (into {} (map (fn [t] [t (str (:id t))]) tempids))]
+                (into {} (map (fn [t] [t (str (:id t))]) @tempids))]
     fulcro-tempid->real-id))
 
 (defn native-ident?

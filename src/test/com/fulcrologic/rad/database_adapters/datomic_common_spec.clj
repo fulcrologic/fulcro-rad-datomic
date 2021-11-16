@@ -1,6 +1,6 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common-spec
   (:require
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking]]
+    [fulcro-spec.core :refer [specification assertions component behavior when-mocking =>]]
     [com.fulcrologic.rad.ids :as ids]
     [com.fulcrologic.rad.test-schema.person :as person]
     [com.fulcrologic.rad.test-schema.address :as address]
@@ -10,8 +10,6 @@
     [fulcro-spec.core :refer [specification assertions]]
     [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
-
-(declare =>)
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
