@@ -8,12 +8,11 @@
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
-    [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
+    [com.fulcrologic.rad.ids :refer [new-uuid select-keys-in-ns]]
     [com.fulcrologic.rad.type-support.decimal :as math]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log]
-    [taoensso.encore :as enc])
-  (:import (java.util UUID)))
+    [taoensso.encore :as enc]))
 
 (def type-map
   {:string   :db.type/string
@@ -201,7 +200,7 @@
           entity-delta))
       delta)))
 
-(defn next-uuid [] (UUID/randomUUID))
+(defn next-uuid [] (new-uuid))
 
 (defn generate-next-id
   "Generate an id. You may pass a `suggested-id` as a UUID or a tempid. If it is a tempid and the ID column is a UUID, then
