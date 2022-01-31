@@ -31,7 +31,8 @@
    :symbol   :db.type/symbol
    :tuple    :db.type/tuple
    :ref      :db.type/ref
-   :uuid     :db.type/uuid})
+   :uuid     :db.type/uuid
+   :uri      :db.type/uri})
 
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
