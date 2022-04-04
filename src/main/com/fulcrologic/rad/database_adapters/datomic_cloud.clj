@@ -90,6 +90,15 @@
   [db ids db-idents desired-output]
   (pull-* db desired-output db-idents ids))
 
+(defn refresh-current-dbs!
+  "Updates the database atoms in the given pathom env. This should be called after any mutation, since a mutation
+   can have a mutation join for returning data."
+  [env]
+  (doseq [k (keys (get env do/connections))
+          :let [conn    (get-in env [do/connections k])
+                db-atom (get-in env [do/databases k])]]
+    (reset! db-atom (d/db conn))))
+
 (defn save-form!
   "Do all of the possible Datomic operations for the given form delta (save to all
    Datomic databases involved). If you include `:datomic/transact` in the `env`, then
