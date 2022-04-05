@@ -338,7 +338,7 @@
         delta   {[::person/id tempid1]           {::person/id              tempid1
                                                   ::person/full-name       {:after "Bob"}
                                                   ::person/primary-address {:after [::address/id (ids/new-uuid 1)]}
-                                                  ::person/role            :com.fulcrologic.rad.test-schema.person.role/admin}
+                                                  ::person/role            {:after :com.fulcrologic.rad.test-schema.person.role/admin}}
                  [::address/id (ids/new-uuid 1)] {::address/street {:before "A St" :after "A1 St"}}}]
     (let [{:keys [tempids]} (datomic/save-form! *env* {::form/delta delta})
           real-id (get tempids tempid1)
