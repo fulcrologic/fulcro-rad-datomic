@@ -95,7 +95,7 @@
         (try
           (let [database-atom   (get-in env [do/databases schema])
                 tx!             (or transact d/transact)
-                {:keys [tempids]} @(d/transact connection txn)
+                {:keys [tempids]} @(tx! connection txn)
                 tempid->real-id (into {}
                                   (map (fn [tempid] [tempid (get tempid->generated-id tempid
                                                               (get tempids (tempid->string tempid)))]))
