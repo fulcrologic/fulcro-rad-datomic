@@ -435,11 +435,57 @@
         (log/info "Unable to complete query.")
         nil))))
 
-(defn id-resolver-pathom2*
+(defmacro lazy-invoke
+  "Only invoke sym when it is available, else throw.
+  @gfredericks on Clojurians figured it out."
+  [sym & args]
+  (let [e (try
+            (requiring-resolve sym)
+            nil
+            (catch Exception e e))]
+    (if e
+      `(throw (Exception. ~(.getMessage e)))
+      `(~sym ~@args))))
+
+(defn make-pathom2-resolver
+  "Creates a pathom2 resolver, skipping the macro"
+  [resolve-sym qualified-key outputs resolve-fn transform-fn]
+  (let [with-resolve-sym (fn [r]
+                           (fn [env input]
+                             (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
+    (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
+             :com.wsscode.pathom.connect/output  outputs
+             :com.wsscode.pathom.connect/batch?  true
+             :com.wsscode.pathom.connect/resolve (with-resolve-sym resolve-fn)
+             :com.wsscode.pathom.connect/input   #{qualified-key}}
+            transform-fn transform-fn)))
+
+(defn make-pathom3-resolver
+  "Creates a pathom3 resolver, skipping the macro"
+  [resolve-sym qualified-key outputs resolve-fn transform-fn]
+  ; We introduce and use lazy-invoke, because Pathom3 bottoms out on a defrecord
+  ; called com.wsscode.pathom3.connect.operation/Resolver
+  ; This requires invoking the resolver function.
+  ; Doing a lazy-invoke will prevent pathom3 from being a hard-dependency for other users of this
+  (lazy-invoke com.wsscode.pathom3.connect.operation/resolver
+    (merge
+      {:com.wsscode.pathom3.connect.operation/op-name resolve-sym
+       :com.wsscode.pathom3.connect.operation/batch?  true
+       :com.wsscode.pathom3.connect.operation/input   [qualified-key]
+       :com.wsscode.pathom3.connect.operation/output  outputs
+       :com.wsscode.pathom3.connect.operation/resolve resolve-fn}
+      (when transform-fn
+        {:com.wsscode.pathom3.connect.operation/transform transform-fn}))))
+
+(defn id-resolver-pathom*
   "Common implementation of id-resolver.
 
+  Takes in resolver-maker-fn, which knows how to make a Pathom resolver for either Pathom2 or Pathom3.
+  Its signature must be [resolve-sym qualified-key outputs resolver-fn transform]
+
   Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
-  [pull-fn pull-many-fn datoms-for-id-fn
+  [resolver-maker-fn
+   pull-fn pull-many-fn datoms-for-id-fn
    all-attributes
    {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve :com.wsscode.pathom.connect/transform] :as id-attribute}
    output-attributes]
@@ -451,29 +497,21 @@
           resolve-sym      (symbol
                              (str (namespace qualified-key))
                              (str (name qualified-key) "-resolver"))
-          with-resolve-sym (fn [r]
-                             (fn [env input]
-                               (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
+          resolver-fn (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
+                                (->> (entity-query*
+                                       pull-fn pull-many-fn datoms-for-id-fn
+                                       (assoc env
+                                         ::attr/schema schema
+                                         ::attr/attributes output-attributes
+                                         ::id-attribute id-attribute
+                                         ::default-query pull-query)
+                                       input)
+                                     (datomic-result->pathom-result key->attribute outputs)
+                                     (auth/redact env)))
+                              wrap-resolve (wrap-resolve))]
       (log/debug "Computed output is" outputs)
       (log/debug "Datomic pull query to derive output is" pull-query)
-      (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
-               :com.wsscode.pathom.connect/output  outputs
-               :com.wsscode.pathom.connect/batch?  true
-               :com.wsscode.pathom.connect/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                                                             (->> (entity-query*
-                                                                    pull-fn pull-many-fn datoms-for-id-fn
-                                                                    (assoc env
-                                                                      ::attr/schema schema
-                                                                      ::attr/attributes output-attributes
-                                                                      ::id-attribute id-attribute
-                                                                      ::default-query pull-query)
-                                                                    input)
-                                                               (datomic-result->pathom-result key->attribute outputs)
-                                                               (auth/redact env)))
-                                                     wrap-resolve (wrap-resolve)
-                                                     :always (with-resolve-sym))
-               :com.wsscode.pathom.connect/input   #{qualified-key}}
-        transform transform))
+      (resolver-maker-fn resolve-sym qualified-key outputs resolver-fn transform))
     (do
       (log/error "Unable to generate id-resolver. "
         "Attribute was missing schema, or could not be found in the attribute registry: " qualified-key)
@@ -482,8 +520,11 @@
 (defn generate-resolvers*
   "Common implementation of generate-resolvers.
 
+  Takes in resolver-maker-fn, which knows how to make a Pathom resolver for either Pathom2 or Pathom3.
+
   Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
-  [pull-fn pull-many-fn datoms-for-id-fn
+  [resolver-maker-fn
+   pull-fn pull-many-fn datoms-for-id-fn
    attributes schema]
   (let [attributes            (filter #(= schema (::attr/schema %)) attributes)
         key->attribute        (attr/attribute-map attributes)
@@ -495,7 +536,7 @@
         entity-resolvers      (reduce-kv
                                 (fn [result k v]
                                   (enc/if-let [attr     (key->attribute k)
-                                               resolver (id-resolver-pathom2* pull-fn pull-many-fn datoms-for-id-fn attributes attr v)]
+                                               resolver (id-resolver-pathom* resolver-maker-fn pull-fn pull-many-fn datoms-for-id-fn attributes attr v)]
                                     (conj result resolver)
                                     (do
                                       (log/error "Internal error generating resolver for ID key" k)
