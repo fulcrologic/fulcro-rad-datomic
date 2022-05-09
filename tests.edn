@@ -3,6 +3,11 @@
                  :ns-patterns  ["-test$" "-spec$"]
                  :test-paths   ["src/test"]
                  :skip-meta    [:integration]
+                 :source-paths ["src/main"]}
+                {:id           :unit-including-cloud
+                 :ns-patterns  ["-test$" "-spec$"]
+                 :test-paths   ["src/test" "src/test-cloud"]
+                 :skip-meta    [:integration]
                  :source-paths ["src/main"]}]
      :reporter [fulcro-spec.reporters.terminal/fulcro-report]
      :plugins  []}
