@@ -17,13 +17,11 @@
     [taoensso.encore :as enc]
     [taoensso.timbre :as log]))
 
-(defn ref-entity->ident [db {:db/keys [ident id] :as ent}]
-  (cond
-    ident ident
-    id (if-let [ident (:v (first (d/datoms db :eavt id :db/ident)))]
-         ident
-         ent)
-    :else ent))
+(defn datoms-for-id-peer-api [db id]
+  (d/datoms db :eavt id :db/ident))
+
+(defn ref-entity->ident [db ent]
+  (common/ref-entity->ident* db datoms-for-id-peer-api ent))
 
 (defn replace-ref-types
   "dbc   the database to query
@@ -31,22 +29,7 @@
           (rather than retrieving the entity id)
    m     map returned from datomic pull containing the entity IDs you want to deref"
   [db refs arg]
-  (walk/postwalk
-    (fn [arg]
-      (cond
-        (and (map? arg) (some #(contains? refs %) (keys arg)))
-        (reduce
-          (fn [acc ref-k]
-            (cond
-              (and (get acc ref-k) (not (vector? (get acc ref-k))))
-              (update acc ref-k (partial ref-entity->ident db))
-              (and (get acc ref-k) (vector? (get acc ref-k)))
-              (update acc ref-k #(mapv (partial ref-entity->ident db) %))
-              :else acc))
-          arg
-          refs)
-        :else arg))
-    arg))
+  (common/replace-ref-types* db datoms-for-id-peer-api refs arg))
 
 (defn pull-*
   "Will either call d/pull or d/pull-many depending on if the input is
@@ -54,19 +37,13 @@
 
   Optionally takes in a transform-fn, applies to individual result(s)."
   ([db pattern db-idents eid-or-eids]
-   (->> (if (and (not (eql/ident? eid-or-eids)) (sequential? eid-or-eids))
-          (d/pull-many db pattern eid-or-eids)
-          (d/pull db pattern eid-or-eids))
-     (replace-ref-types db db-idents)))
-  ([db pattern ident-keywords eid-or-eids transform-fn]
-   (let [result (pull-* db pattern ident-keywords eid-or-eids)]
-     (if (sequential? result)
-       (mapv transform-fn result)
-       (transform-fn result)))))
+   (common/pull-*-common db d/pull d/pull-many datoms-for-id-peer-api pattern db-idents eid-or-eids))
+  ([db pattern db-idents eid-or-eids transform-fn]
+   (common/pull-*-common db d/pull d/pull-many datoms-for-id-peer-api pattern db-idents eid-or-eids transform-fn)))
 
 (defn get-by-ids
   [db ids db-idents desired-output]
-  (pull-* db desired-output db-idents ids))
+  (common/get-by-ids* db d/pull d/pull-many datoms-for-id-peer-api ids db-idents desired-output))
 
 (defn refresh-current-dbs!
   "Updates the database atoms in the given pathom env. This should be called after any mutation, since a mutation
@@ -354,95 +331,32 @@
      (do/databases config))))
 
 (defn entity-query
-  [{:keys       [::attr/schema ::id-attribute]
+  [{:keys       [::attr/schema ::id-attribute ::default-query]
     ::attr/keys [attributes]
-    :as         env} input]
-  (let [{::attr/keys [qualified-key]
-         ::keys      [native-id?]} id-attribute
-        one? (not (sequential? input))]
-    (enc/if-let [db           (some-> (get-in env [do/databases schema]) deref)
-                 query        (get env ::default-query)
-                 ids          (if one?
-                                [(get input qualified-key)]
-                                (into [] (keep #(get % qualified-key) input)))
-                 ids          (if native-id?
-                                ids
-                                (mapv (fn [id] [qualified-key id]) ids))
-                 enumerations (into #{}
-                                (keep #(when (= :enum (::attr/type %))
-                                         (::attr/qualified-key %)))
-                                attributes)]
-      (do
-        (log/info "Running" query "on entities with " qualified-key ":" ids)
-        (let [result (get-by-ids db ids enumerations query)]
-          (if one?
-            (first result)
-            result)))
-      (do
-        (log/info "Unable to complete query.")
-        nil))))
+    :as         env}
+   input]
+  (let [common-env (assoc env ::common/id-attribute id-attribute ::common/default-query default-query)]
+    (common/entity-query* d/pull d/pull-many datoms-for-id-peer-api common-env input)))
 
 (defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
   [all-attributes
    {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve :com.wsscode.pathom.connect/transform] :as id-attribute}
    output-attributes]
-  (log/info "Building ID resolver for" qualified-key)
-  (enc/if-let [_          id-attribute
-               outputs    (attr/attributes->eql output-attributes)
-               pull-query (common/pathom-query->datomic-query all-attributes outputs)]
-    (let [resolve-sym      (symbol
-                             (str (namespace qualified-key))
-                             (str (name qualified-key) "-resolver"))
-          with-resolve-sym (fn [r]
-                             (fn [env input]
-                               (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
-      (log/debug "Computed output is" outputs)
-      (log/debug "Datomic pull query to derive output is" pull-query)
-      (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
-               :com.wsscode.pathom.connect/output  outputs
-               :com.wsscode.pathom.connect/batch?  true
-               :com.wsscode.pathom.connect/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                                                             (->> (entity-query
-                                                                    (assoc env
-                                                                      ::attr/schema schema
-                                                                      ::attr/attributes output-attributes
-                                                                      ::id-attribute id-attribute
-                                                                      ::default-query pull-query)
-                                                                    input)
-                                                               (common/datomic-result->pathom-result key->attribute outputs)
-                                                               (auth/redact env)))
-                                                     wrap-resolve (wrap-resolve)
-                                                     :always (with-resolve-sym))
-               :com.wsscode.pathom.connect/input   #{qualified-key}}
-        transform transform))
-    (do
-      (log/error "Unable to generate id-resolver. "
-        "Attribute was missing schema, or could not be found in the attribute registry: " qualified-key)
-      nil)))
+  (let [common-id-attribute (assoc id-attribute ::common/wrap-resolve wrap-resolve)]
+    (common/id-resolver-pathom2*
+      d/pull d/pull-many datoms-for-id-peer-api
+      all-attributes
+      common-id-attribute
+      output-attributes)))
 
 (defn generate-resolvers
   "Generate all of the resolvers that make sense for the given database config. This should be passed
   to your Pathom parser to register resolvers for each of your schemas."
   [attributes schema]
-  (let [attributes            (filter #(= schema (::attr/schema %)) attributes)
-        key->attribute        (attr/attribute-map attributes)
-        entity-id->attributes (group-by ::k (mapcat (fn [attribute]
-                                                      (map
-                                                        (fn [id-key] (assoc attribute ::k id-key))
-                                                        (get attribute ::attr/identities)))
-                                              attributes))
-        entity-resolvers      (reduce-kv
-                                (fn [result k v]
-                                  (enc/if-let [attr     (key->attribute k)
-                                               resolver (id-resolver attributes attr v)]
-                                    (conj result resolver)
-                                    (do
-                                      (log/error "Internal error generating resolver for ID key" k)
-                                      result)))
-                                []
-                                entity-id->attributes)]
-    entity-resolvers))
+  (common/generate-resolvers*
+    d/pull d/pull-many datoms-for-id-peer-api
+    attributes schema))
 
 (def ^:private pristine-db (atom nil))
 (def ^:private migrated-dbs (atom {}))
