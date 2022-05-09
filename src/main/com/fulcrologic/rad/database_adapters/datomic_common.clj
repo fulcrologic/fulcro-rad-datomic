@@ -7,6 +7,7 @@
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
+    [com.fulcrologic.rad.authorization :as auth]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.ids :refer [new-uuid select-keys-in-ns]]
     [com.fulcrologic.rad.type-support.decimal :as math]
@@ -347,6 +348,161 @@
     (when tuple-txn
       (transact conn (vec tuple-txn)))))
 
+(defn ref-entity->ident* [db datoms-for-id-fn {:db/keys [ident id] :as ent}]
+  "Using datoms-for-id-fn, get to the ident for an entity"
+  (cond
+    ident ident
+    id (if-let [ident (:v (first (datoms-for-id-fn db id)))]
+         ident
+         ent)
+    :else ent))
+
+(defn replace-ref-types*
+  "Common implementation of replace-ref-types.
+
+  Takes in datoms-for-id-fn, that is different between on-prem and cloud."
+  [db datoms-for-id-fn refs arg]
+  (walk/postwalk
+    (fn [arg]
+      (cond
+        (and (map? arg) (some #(contains? refs %) (keys arg)))
+        (reduce
+          (fn [acc ref-k]
+            (cond
+              (and (get acc ref-k) (not (vector? (get acc ref-k))))
+              (update acc ref-k (partial ref-entity->ident* db datoms-for-id-fn))
+              (and (get acc ref-k) (vector? (get acc ref-k)))
+              (update acc ref-k #(mapv (partial ref-entity->ident* db datoms-for-id-fn) %))
+              :else acc))
+          arg
+          refs)
+        :else arg))
+    arg))
+
+(defn pull-*-common
+  "Common implementation of pull-*.
+
+  Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
+  ([db pull-fn pull-many-fn datoms-for-id-fn pattern db-idents eid-or-eids]
+   (->> (if (and (not (eql/ident? eid-or-eids)) (sequential? eid-or-eids))
+          (pull-many-fn db pattern eid-or-eids)
+          (pull-fn db pattern eid-or-eids))
+     (replace-ref-types* db datoms-for-id-fn db-idents)))
+  ([db pull-fn pull-many-fn datoms-for-id-fn pattern ident-keywords eid-or-eids transform-fn]
+   (let [result (pull-*-common db pull-fn pull-many-fn datoms-for-id-fn pattern ident-keywords eid-or-eids)]
+     (if (sequential? result)
+       (mapv transform-fn result)
+       (transform-fn result)))))
+
+(defn get-by-ids*
+  "Common implementation of get-by-ids.
+
+  Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
+  [db pull-fn pull-many-fn datoms-for-id-fn ids db-idents desired-output]
+  (pull-*-common db pull-fn pull-many-fn datoms-for-id-fn desired-output db-idents ids))
+
+(defn entity-query*
+  "Common implementation of entity-query.
+
+  Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
+  [pull-fn pull-many-fn datoms-for-id-fn
+   {:keys       [::attr/schema ::id-attribute]
+    ::attr/keys [attributes]
+    :as         env}
+   input]
+  (let [{native-id?  do/native-id?
+         ::attr/keys [qualified-key]} id-attribute
+        one? (not (sequential? input))]
+    (enc/if-let [db           (some-> (get-in env [do/databases schema]) deref)
+                 query        (get env ::default-query)
+                 ids          (if one?
+                                [(get input qualified-key)]
+                                (into [] (keep #(get % qualified-key) input)))
+                 ids          (if native-id?
+                                ids
+                                (mapv (fn [id] [qualified-key id]) ids))
+                 enumerations (into #{}
+                                (keep #(when (= :enum (::attr/type %))
+                                         (::attr/qualified-key %)))
+                                attributes)]
+      (do
+        (log/trace "Running" query "on entities with " qualified-key ":" ids)
+        (let [result (get-by-ids* db pull-fn pull-many-fn datoms-for-id-fn ids enumerations query)]
+          (if one?
+            (first result)
+            result)))
+      (do
+        (log/info "Unable to complete query.")
+        nil))))
+
+(defn id-resolver-pathom2*
+  "Common implementation of id-resolver.
+
+  Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
+  [pull-fn pull-many-fn datoms-for-id-fn
+   all-attributes
+   {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve :com.wsscode.pathom.connect/transform] :as id-attribute}
+   output-attributes]
+  (log/info "Building ID resolver for" qualified-key)
+  (enc/if-let [_          id-attribute
+               outputs    (attr/attributes->eql output-attributes)
+               pull-query (pathom-query->datomic-query all-attributes outputs)]
+    (let [wrap-resolve     (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
+          resolve-sym      (symbol
+                             (str (namespace qualified-key))
+                             (str (name qualified-key) "-resolver"))
+          with-resolve-sym (fn [r]
+                             (fn [env input]
+                               (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
+      (log/debug "Computed output is" outputs)
+      (log/debug "Datomic pull query to derive output is" pull-query)
+      (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
+               :com.wsscode.pathom.connect/output  outputs
+               :com.wsscode.pathom.connect/batch?  true
+               :com.wsscode.pathom.connect/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
+                                                             (->> (entity-query*
+                                                                    pull-fn pull-many-fn datoms-for-id-fn
+                                                                    (assoc env
+                                                                      ::attr/schema schema
+                                                                      ::attr/attributes output-attributes
+                                                                      ::id-attribute id-attribute
+                                                                      ::default-query pull-query)
+                                                                    input)
+                                                               (datomic-result->pathom-result key->attribute outputs)
+                                                               (auth/redact env)))
+                                                     wrap-resolve (wrap-resolve)
+                                                     :always (with-resolve-sym))
+               :com.wsscode.pathom.connect/input   #{qualified-key}}
+        transform transform))
+    (do
+      (log/error "Unable to generate id-resolver. "
+        "Attribute was missing schema, or could not be found in the attribute registry: " qualified-key)
+      nil)))
+
+(defn generate-resolvers*
+  "Common implementation of generate-resolvers.
+
+  Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
+  [pull-fn pull-many-fn datoms-for-id-fn
+   attributes schema]
+  (let [attributes            (filter #(= schema (::attr/schema %)) attributes)
+        key->attribute        (attr/attribute-map attributes)
+        entity-id->attributes (group-by ::k (mapcat (fn [attribute]
+                                                      (map
+                                                        (fn [id-key] (assoc attribute ::k id-key))
+                                                        (get attribute ::attr/identities)))
+                                              attributes))
+        entity-resolvers      (reduce-kv
+                                (fn [result k v]
+                                  (enc/if-let [attr     (key->attribute k)
+                                               resolver (id-resolver-pathom2* pull-fn pull-many-fn datoms-for-id-fn attributes attr v)]
+                                    (conj result resolver)
+                                    (do
+                                      (log/error "Internal error generating resolver for ID key" k)
+                                      result)))
+                                []
+                                entity-id->attributes)]
+    entity-resolvers))
 
 (defn wrap-env
   "Build a (fn [env] env') that adds RAD datomic support to an env. If `base-wrapper` is supplied, then it will be called
