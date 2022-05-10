@@ -12,14 +12,15 @@
                        :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}}}
 
            :clj-tests {:extra-paths ["src/test"]
-                       :main-opts   ["-m" "kaocha.runner"]
+                       :main-opts   ["-m" "kaocha.runner" "unit"]
                        :extra-deps  {lambdaisland/kaocha {:mvn/version "1.0.732"}}}
 
            :cloud     {:extra-paths ["src/test-cloud"]
+                       :main-opts   ["-m" "kaocha.runner" "unit-including-cloud"]
                        :extra-deps  {dev-local-tu/dev-local-tu {:mvn/version "0.1.0"}
-                                     ; N.B. - follow instuctions for installing dev-local
+                                     ; N.B. - follow instructions for installing dev-local
                                      ; https://docs.datomic.com/cloud/dev-local.html#using
-                                     com.datomic/dev-local     {:mvn/version "0.9.235"}
+                                     com.datomic/dev-local     {:mvn/version "1.0.243"}
                                      com.datomic/client-cloud  {:mvn/version "0.8.102"}}}
 
            :provided  {:extra-deps {com.datomic/datomic-free {:mvn/version "0.9.5697"
