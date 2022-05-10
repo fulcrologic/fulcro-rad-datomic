@@ -10,9 +10,12 @@
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.ids :as ids]
     [com.fulcrologic.rad.pathom :as pathom]
+    [com.fulcrologic.rad.pathom3]
     [com.fulcrologic.rad.test-schema.address :as address]
     [com.fulcrologic.rad.test-schema.person :as person]
     [com.fulcrologic.rad.test-schema.thing :as thing]
+    [com.wsscode.pathom3.connect.indexes :as pci]
+    [com.wsscode.pathom3.interface.eql :as p.eql]
     [datomic.api :as d]
     [fulcro-spec.core :refer [specification assertions component behavior when-mocking =1x=> =>]]
     [taoensso.timbre :as log]))
@@ -371,7 +374,71 @@
 ;; Round-trip tests
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(specification "Pathom parser integration (save + generated resolvers)"
+(defn save-new-items-native-id
+  [parser-taking-tx]
+  (let [temp-person-id (tempid/tempid)
+        delta          {[::person/id temp-person-id] {::person/id        {:after temp-person-id}
+                                                      ::person/full-name {:after "Bob"}}}
+        {::form/syms [save-form]} (parser-taking-tx `[{(form/save-form ~{::form/id        temp-person-id
+                                                                         ::form/master-pk ::person/id
+                                                                         ::form/delta     delta}) [:tempids ::person/id ::person/full-name]}])
+        {:keys [tempids]} save-form
+        real-id        (get tempids temp-person-id)
+        entity         (dissoc save-form :tempids)]
+    (assertions
+      "Includes the remapped (native) ID for native id attribute"
+      (pos-int? real-id) => true
+      "Returns the newly-created attributes"
+      entity => {::person/id        real-id
+                 ::person/full-name "Bob"})))
+
+(defn save-new-items-generated-id
+  [parser-taking-tx]
+  (let [temp-address-id (tempid/tempid)
+        delta           {[::address/id temp-address-id] {::address/id     {:after temp-address-id}
+                                                         ::address/street {:after "A St"}}}
+        {::form/syms [save-form]} (parser-taking-tx `[{(form/save-form ~{::form/id        temp-address-id
+                                                                         ::form/master-pk ::address/id
+                                                                         ::form/delta     delta}) [:tempids ::address/id ::address/street]}])
+        {:keys [tempids]} save-form
+        real-id         (get tempids temp-address-id)
+        entity          (dissoc save-form :tempids)]
+    (assertions
+      "Includes the remapped (UUID) ID for id attribute"
+      (uuid? real-id) => true
+      "Returns the newly-created attributes"
+      entity => {::address/id     real-id
+                 ::address/street "A St"})))
+
+(defn save-a-tree
+  [parser-taking-tx]
+  (let [temp-person-id  (tempid/tempid)
+        temp-address-id (tempid/tempid)
+        delta           {[::person/id temp-person-id]
+                         {::person/id              {:after temp-person-id}
+                          ::person/role            {:after :com.fulcrologic.rad.test-schema.person.role/admin}
+                          ::person/primary-address {:after [::address/id temp-address-id]}}
+
+                         [::address/id temp-address-id]
+                         {::address/id     {:after temp-address-id}
+                          ::address/street {:after "A St"}}}
+        {::form/syms [save-form]} (parser-taking-tx `[{(form/save-form ~{::form/id        temp-person-id
+                                                                         ::form/master-pk ::person/id
+                                                                         ::form/delta     delta})
+                                                       [:tempids ::person/id ::person/role
+                                                        {::person/primary-address [::address/id ::address/street]}]}])
+        {:keys [tempids]} save-form
+        addr-id         (get tempids temp-address-id)
+        person-id       (get tempids temp-person-id)
+        entity          (dissoc save-form :tempids)]
+    (assertions
+      "Returns the newly-created graph"
+      entity => {::person/id              person-id
+                 ::person/role            :com.fulcrologic.rad.test-schema.person.role/admin
+                 ::person/primary-address {::address/id     addr-id
+                                           ::address/street "A St"}})))
+
+(specification "Pathom2 parser integration (save + generated resolvers)"
   (let [save-middleware     (datomic/wrap-datomic-save)
         delete-middleware   (datomic/wrap-datomic-delete)
         automatic-resolvers (datomic/generate-resolvers all-attributes :production)
@@ -379,65 +446,34 @@
                               [(attr/pathom-plugin all-attributes)
                                (form/pathom-plugin save-middleware delete-middleware)
                                (datomic/pathom-plugin (fn [env] {:production *conn*}))]
-                              [automatic-resolvers form/resolvers])]
+                              [automatic-resolvers form/resolvers])
+        parser-taking-tx    (partial parser {})]
     (component "Saving new items (native ID)"
-      (let [temp-person-id (tempid/tempid)
-            delta          {[::person/id temp-person-id] {::person/id        {:after temp-person-id}
-                                                          ::person/full-name {:after "Bob"}}}
-            {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
-                                                                      ::form/master-pk ::person/id
-                                                                      ::form/delta     delta}) [:tempids ::person/id ::person/full-name]}])
-            {:keys [tempids]} save-form
-            real-id        (get tempids temp-person-id)
-            entity         (dissoc save-form :tempids)]
-        (assertions
-          "Includes the remapped (native) ID for native id attribute"
-          (pos-int? real-id) => true
-          "Returns the newly-created attributes"
-          entity => {::person/id        real-id
-                     ::person/full-name "Bob"})))
+      (save-new-items-native-id parser-taking-tx))
     (component "Saving new items (generated ID)"
-      (let [temp-address-id (tempid/tempid)
-            delta           {[::address/id temp-address-id] {::address/id     {:after temp-address-id}
-                                                             ::address/street {:after "A St"}}}
-            {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-address-id
-                                                                      ::form/master-pk ::address/id
-                                                                      ::form/delta     delta}) [:tempids ::address/id ::address/street]}])
-            {:keys [tempids]} save-form
-            real-id         (get tempids temp-address-id)
-            entity          (dissoc save-form :tempids)]
-        (assertions
-          "Includes the remapped (UUID) ID for id attribute"
-          (uuid? real-id) => true
-          "Returns the newly-created attributes"
-          entity => {::address/id     real-id
-                     ::address/street "A St"})))
+      (save-new-items-generated-id parser-taking-tx))
     (component "Saving a tree"
-      (let [temp-person-id  (tempid/tempid)
-            temp-address-id (tempid/tempid)
-            delta           {[::person/id temp-person-id]
-                             {::person/id              {:after temp-person-id}
-                              ::person/role            {:after :com.fulcrologic.rad.test-schema.person.role/admin}
-                              ::person/primary-address {:after [::address/id temp-address-id]}}
+      (save-a-tree parser-taking-tx))))
 
-                             [::address/id temp-address-id]
-                             {::address/id     {:after temp-address-id}
-                              ::address/street {:after "A St"}}}
-            {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
-                                                                      ::form/master-pk ::person/id
-                                                                      ::form/delta     delta})
-                                                    [:tempids ::person/id ::person/role
-                                                     {::person/primary-address [::address/id ::address/street]}]}])
-            {:keys [tempids]} save-form
-            addr-id         (get tempids temp-address-id)
-            person-id       (get tempids temp-person-id)
-            entity          (dissoc save-form :tempids)]
-        (assertions
-          "Returns the newly-created graph"
-          entity => {::person/id              person-id
-                     ::person/role            :com.fulcrologic.rad.test-schema.person.role/admin
-                     ::person/primary-address {::address/id     addr-id
-                                               ::address/street "A St"}})))))
+(specification "Pathom3 parser integration (save + generated resolvers)"
+  (let [save-middleware     (datomic/wrap-datomic-save)
+        delete-middleware   (datomic/wrap-datomic-delete)
+        automatic-resolvers (datomic/generate-resolvers-pathom3 all-attributes :production)
+        form-resolvers      (com.fulcrologic.rad.pathom3/convert-resolvers form/resolvers)
+        indexes             (pci/register [automatic-resolvers form-resolvers])
+        wrap-env (-> (attr/wrap-env all-attributes)
+                     (common/wrap-env
+                       (fn [_env] {:production *conn*})
+                       d/db)
+                     (form/wrap-env save-middleware delete-middleware))
+        env (wrap-env indexes)
+        parser-taking-tx (partial p.eql/process env)]
+    component "Saving new items (native ID)"
+      (save-new-items-native-id parser-taking-tx)
+    (component "Saving new items (generated ID)"
+      (save-new-items-generated-id parser-taking-tx))
+    (component "Saving a tree"
+      (save-a-tree parser-taking-tx))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Attr Options Tests
@@ -450,5 +486,5 @@
         "person resolver has been transformed by ::pc/transform"
         (do
           (log/spy :info person-resolver)
-          (::person/transform-succeeded person-resolver)) => true
-        ))))
+          (::person/transform-succeeded person-resolver)) => true))))
+

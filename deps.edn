@@ -4,12 +4,14 @@
            com.taoensso/timbre        {:mvn/version "4.10.0"}
            com.taoensso/encore        {:mvn/version "2.120.0"}
            com.fulcrologic/guardrails {:mvn/version "1.1.4"}
-           com.fulcrologic/fulcro-rad {:mvn/version "1.0.0-RC1"}
+           com.fulcrologic/fulcro-rad {:mvn/version "1.1.11"}
            vvvvalvalval/datomock      {:mvn/version "0.2.2"}
            org.clojure/clojure        {:mvn/version "1.10.1"}}
 
  :aliases {:test      {:extra-paths ["src/test"]
-                       :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}}}
+                       :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}
+                                     com.wsscode/pathom {:mvn/version "2.4.0"}
+                                     com.wsscode/pathom3 {:mvn/version "2022.04.20-alpha"}}}
 
            :clj-tests {:extra-paths ["src/test"]
                        :main-opts   ["-m" "kaocha.runner" "unit"]

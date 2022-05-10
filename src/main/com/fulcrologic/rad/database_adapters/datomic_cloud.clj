@@ -233,12 +233,13 @@
     (common/entity-query* d/pull pull-many datoms-for-id-client-api common-env input)))
 
 (defn id-resolver
-  "Generates a resolver from `id-attribute` to the `output-attributes`."
+  "Generates a Pathom2 resolver from `id-attribute` to the `output-attributes`."
   [all-attributes
    {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve :com.wsscode.pathom.connect/transform] :as id-attribute}
    output-attributes]
   (let [common-id-attribute (assoc id-attribute ::common/wrap-resolve wrap-resolve)]
-    (common/id-resolver-pathom2*
+    (common/id-resolver-pathom*
+      common/make-pathom2-resolver
       d/pull pull-many datoms-for-id-client-api
       all-attributes
       common-id-attribute
@@ -246,9 +247,19 @@
 
 (defn generate-resolvers
   "Generate all of the resolvers that make sense for the given database config. This should be passed
-  to your Pathom parser to register resolvers for each of your schemas."
+  to your Pathom2 parser to register resolvers for each of your schemas."
   [attributes schema]
   (common/generate-resolvers*
+    common/make-pathom2-resolver
+    d/pull pull-many datoms-for-id-client-api
+    attributes schema))
+
+(defn generate-resolvers-pathom3
+  "Generate all of the resolvers that make sense for the given database config. This should be passed
+  to your Pathom3 parser to register resolvers for each of your schemas."
+  [attributes schema]
+  (common/generate-resolvers*
+    common/make-pathom3-resolver
     d/pull pull-many datoms-for-id-client-api
     attributes schema))
 
