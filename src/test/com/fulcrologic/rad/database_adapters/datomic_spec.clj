@@ -468,8 +468,8 @@
                      (form/wrap-env save-middleware delete-middleware))
         env (wrap-env indexes)
         parser-taking-tx (partial p.eql/process env)]
-    component "Saving new items (native ID)"
-      (save-new-items-native-id parser-taking-tx)
+    (component "Saving new items (native ID)"
+      (save-new-items-native-id parser-taking-tx))
     (component "Saving new items (generated ID)"
       (save-new-items-generated-id parser-taking-tx))
     (component "Saving a tree"
