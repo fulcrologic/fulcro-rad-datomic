@@ -1,18 +1,19 @@
 (ns com.fulcrologic.rad.test-schema.address
   (:require
-    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]))
+   [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
+   [com.fulcrologic.rad.attributes-options :as ao]))
 
 (defattr id ::id :uuid
-  {::attr/identity? true
-   ::attr/schema    :production})
+  {ao/identity? true
+   ao/schema    :production})
 
 (defattr enabled? ::enabled? :boolean
-  {::attr/identities #{::id}
-   ::attr/schema     :production})
+  {ao/identities #{::id}
+   ao/schema     :production})
 
 (defattr street ::street :string
-  {::attr/identities #{::id}
-   ::attr/required?  true
-   ::attr/schema     :production})
+  {ao/identities #{::id}
+   ao/required?  true
+   ao/schema     :production})
 
 (def attributes [id enabled? street])

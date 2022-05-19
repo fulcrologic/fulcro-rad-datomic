@@ -17,7 +17,7 @@
     [com.wsscode.pathom3.connect.indexes :as pci]
     [com.wsscode.pathom3.interface.eql :as p.eql]
     [datomic.api :as d]
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking =1x=> =>]]
+    [fulcro-spec.core :refer [specification assertions component when-mocking =1x=> =>]]
     [taoensso.timbre :as log]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
@@ -461,13 +461,13 @@
         automatic-resolvers (datomic/generate-resolvers-pathom3 all-attributes :production)
         form-resolvers      (com.fulcrologic.rad.pathom3/convert-resolvers form/resolvers)
         indexes             (pci/register [automatic-resolvers form-resolvers])
-        wrap-env (-> (attr/wrap-env all-attributes)
-                     (common/wrap-env
-                       (fn [_env] {:production *conn*})
-                       d/db)
-                     (form/wrap-env save-middleware delete-middleware))
-        env (wrap-env indexes)
-        parser-taking-tx (partial p.eql/process env)]
+        wrap-env            (-> (attr/wrap-env all-attributes)
+                              (common/wrap-env
+                                (fn [_env] {:production *conn*})
+                                d/db)
+                              (form/wrap-env save-middleware delete-middleware))
+        env                 (wrap-env indexes)
+        parser-taking-tx    (partial p.eql/process env)]
     (component "Saving new items (native ID)"
       (save-new-items-native-id parser-taking-tx))
     (component "Saving new items (generated ID)"

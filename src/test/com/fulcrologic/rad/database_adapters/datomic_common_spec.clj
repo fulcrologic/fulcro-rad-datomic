@@ -1,15 +1,14 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-common-spec
   (:require
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking =>]]
-    [com.fulcrologic.rad.ids :as ids]
-    [com.fulcrologic.rad.test-schema.person :as person]
-    [com.fulcrologic.rad.test-schema.address :as address]
-    [com.fulcrologic.rad.test-schema.thing :as thing]
+    [clojure.test :refer [use-fixtures]]
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.database-adapters.datomic-common :as common]
-    [fulcro-spec.core :refer [specification assertions]]
-    [clojure.test :refer [use-fixtures]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
+    [com.fulcrologic.rad.ids :as ids]
+    [com.fulcrologic.rad.test-schema.address :as address]
+    [com.fulcrologic.rad.test-schema.person :as person]
+    [com.fulcrologic.rad.test-schema.thing :as thing]
+    [fulcro-spec.core :refer [specification assertions component when-mocking =>]]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}

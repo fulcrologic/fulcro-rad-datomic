@@ -23,9 +23,9 @@
                                      ; N.B. - follow instructions for installing dev-local
                                      ; https://docs.datomic.com/cloud/dev-local.html#using
                                      com.datomic/dev-local     {:mvn/version "1.0.243"}
-                                     com.datomic/client-cloud  {:mvn/version "0.8.102"}}}
+                                     com.datomic/client-cloud  {:mvn/version "1.0.120"}}}
 
-           :provided  {:extra-deps {com.datomic/datomic-free {:mvn/version "0.9.5697"
+           :provided  {:extra-deps {com.datomic/datomic-pro {:mvn/version "1.0.6165"
                                                               :exclusions  [org.slf4j/slf4j-nop]}}}
 
            :dev       {:extra-paths ["src/dev" "resources"]

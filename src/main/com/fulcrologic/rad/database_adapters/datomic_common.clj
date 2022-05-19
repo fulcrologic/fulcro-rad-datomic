@@ -458,7 +458,7 @@
              :com.wsscode.pathom.connect/batch?  true
              :com.wsscode.pathom.connect/resolve (with-resolve-sym resolve-fn)
              :com.wsscode.pathom.connect/input   #{qualified-key}}
-            transform-fn transform-fn)))
+      transform-fn transform-fn)))
 
 (defn make-pathom3-resolver
   "Creates a pathom3 resolver, skipping the macro"
@@ -493,22 +493,22 @@
   (enc/if-let [_          id-attribute
                outputs    (attr/attributes->eql output-attributes)
                pull-query (pathom-query->datomic-query all-attributes outputs)]
-    (let [wrap-resolve     (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
-          resolve-sym      (symbol
-                             (str (namespace qualified-key))
-                             (str (name qualified-key) "-resolver"))
-          resolver-fn (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                                (->> (entity-query*
-                                       pull-fn pull-many-fn datoms-for-id-fn
-                                       (assoc env
-                                         ::attr/schema schema
-                                         ::attr/attributes output-attributes
-                                         ::id-attribute id-attribute
-                                         ::default-query pull-query)
-                                       input)
-                                     (datomic-result->pathom-result key->attribute outputs)
-                                     (auth/redact env)))
-                              wrap-resolve (wrap-resolve))]
+    (let [wrap-resolve (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
+          resolve-sym  (symbol
+                         (str (namespace qualified-key))
+                         (str (name qualified-key) "-resolver"))
+          resolver-fn  (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
+                                 (->> (entity-query*
+                                        pull-fn pull-many-fn datoms-for-id-fn
+                                        (assoc env
+                                          ::attr/schema schema
+                                          ::attr/attributes output-attributes
+                                          ::id-attribute id-attribute
+                                          ::default-query pull-query)
+                                        input)
+                                   (datomic-result->pathom-result key->attribute outputs)
+                                   (auth/redact env)))
+                         wrap-resolve (wrap-resolve))]
       (log/debug "Computed output is" outputs)
       (log/debug "Datomic pull query to derive output is" pull-query)
       (resolver-maker-fn resolve-sym qualified-key outputs resolver-fn transform))
@@ -587,3 +587,18 @@
        (fn env-wrap-wrap-internal [env tx]
          (parser (augment env) tx)))}))
 
+(defn id->eid
+  "Attempt to find the native :db/id for the given RAD reference attribute. For example converting the
+  non-native UUID of an entity to the native :db/id.
+
+  `:datoms` must be a Datomic-client like datoms function.
+  `::attr/key->attribute` must resolve attributes in RAD by keyword "
+  [db {::attr/keys [key->attribute]
+       :keys       [datoms] :as env} {::attr/keys [target] :as ref-attribute} rad-id-value]
+  (let [{::attr/keys [qualified-key]} (key->attribute target)]
+    (when (and db datoms qualified-key rad-id-value)
+      (->
+        (datoms db {:index      :avet
+                    :components [qualified-key rad-id-value]})
+        first
+        :e))))

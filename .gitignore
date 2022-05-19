@@ -23,3 +23,4 @@ target
 .clj-kondo/.cache
 pom.xml.releaseBackup
 release.properties
+.clj-kondo
