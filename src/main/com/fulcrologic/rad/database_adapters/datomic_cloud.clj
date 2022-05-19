@@ -1,17 +1,12 @@
 (ns com.fulcrologic.rad.database-adapters.datomic-cloud
   (:require
     [clojure.pprint :refer [pprint]]
-    [clojure.walk :as walk]
     [com.fulcrologic.fulcro.algorithms.do-not-use :refer [deep-merge]]
-    [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
-    [com.fulcrologic.rad.authorization :as auth]
-    [com.fulcrologic.rad.database-adapters.datomic-common :as common :refer [type-map]]
+    [com.fulcrologic.rad.database-adapters.datomic-common :as common]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.form :as form]
-    [com.fulcrologic.rad.ids :refer [select-keys-in-ns]]
     [datomic.client.api :as d]
-    [edn-query-language.core :as eql]
     [taoensso.encore :as enc]
     [taoensso.timbre :as log]))
 

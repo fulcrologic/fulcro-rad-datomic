@@ -34,7 +34,6 @@
 (def ^:dynamic *conn* nil)
 (def ^:dynamic *env* {})
 
-
 (defn with-env [tests]
   (with-open [db-env (dev-local-tu/test-env)]
     (let [config {:datomic/env         :test
