@@ -1,17 +1,9 @@
 = Datomic Database Plugin
 
-This library is may have out-of-date documentation. See the current version of the https://github.com/fulcrologic/fulcro-rad-demo[Fulcro RAD Demo] 
+This library is may have out-of-date documentation. See the current version of the https://github.com/fulcrologic/fulcro-rad-demo[Fulcro RAD Demo]
 for an accurate representation of usage.
 
-Paid support can be obtained from http://www.fulcrologic.com[Fulcrologic, LLC].
-
 image:https://img.shields.io/clojars/v/com.fulcrologic/fulcro-rad-datomic.svg[link=https://clojars.org/com.fulcrologic/fulcro-rad-datomic]
-
-Current SNAPSHOT CI status:
-image:https://circleci.com/gh/fulcrologic/fulcro-rad-datomic/tree/develop.svg?style=svg["CircleCI", link="https://circleci.com/gh/fulcrologic/fulcro-rad-datomic/tree/develop"]
-
-Current RELEASE CI status:
-image:https://circleci.com/gh/fulcrologic/fulcro-rad-datomic/tree/master.svg?style=svg["CircleCI", link="https://circleci.com/gh/fulcrologic/fulcro-rad-datomic/tree/master"]
 
 This is a plugin for Fulcro RAD that adds support for using Datomic databases as the back-end technology.
 
