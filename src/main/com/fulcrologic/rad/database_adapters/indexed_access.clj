@@ -22,13 +22,19 @@
      use a custom index pull when on client in order to modify the network behavior. The default index pull
      in cloud (at the time of this writing) is overly aggressive at read-ahead.
 
-   `attributes` (REQUIRED) is a list of attributes *that can be on the resolved entity* which you want to pull
-   into the result maps. These can be refs or scalars, but the search `attribute`'s `identities` must
-   be a non-empty intersection for them to appear.
+   The options map contains:
 
-   Any ref attributes pulled will automatically be converted to an acceptable RAD format. For example,
-   If using native IDs this means that pulling something like `:purchase/customer` will return
-   `{:purchase/customer {:customer/id 42}}` instead of `{:purchase/customer {:db/id 42}}`.
+   `attributes` (REQUIRED unless `selector`) is a list of attributes *that can be on the resolved entity* which you want to pull
+   into the result maps. These can be refs or scalars, but the search `attribute`'s `identities` must
+   be a non-empty intersection for them to appear. Any ref attributes pulled will automatically be converted to an
+   acceptable RAD format. For example, If using native IDs this means that pulling something like `:purchase/customer`
+   will return `{:purchase/customer {:customer/id 42}}` instead of `{:purchase/customer {:db/id 42}}`. Normally
+   you should use this and allow EQL resolvers to resolve any nesting; however, if you want exact control of the
+   pull query use `selector` instead.
+
+   `selector` (REQUIRED unless `attributes`). The Datomic pull selector. Used when you don't want one constructed
+   from `attributes`. Will be used as-is instead of constructing a pull selector from `attributes` (which is then
+   no longer needed).
 
    The `predicate` will be passed each item before it is accumulated in order to filter them out.
    Doing so causes additional steps in the scan to accumulate up to `limit`, and should be done
@@ -68,10 +74,12 @@
     :keys       [datoms index-pull]
     :as         env}
    {::attr/keys [qualified-key] :as attribute}
-   {:keys [start attributes while predicate limit offset reverse?]
+   {:keys [start attributes selector while predicate limit offset reverse?]
     :or   {limit 10 offset 0}}]
-  (when (empty? attributes)
-    (throw (IllegalArgumentException. "`attributes` MUST contain something, or your results would be empty")))
+  (when (or
+          (and (vector? selector) (seq attributes))
+          (and (nil? selector) (empty? attributes)))
+    (throw (IllegalArgumentException. "`attributes` OR `selector` is required. BUT NOT BOTH.")))
   (when (nil? start)
     (throw (IllegalArgumentException. "`start` MUST be non-nil")))
   (let [scan-count    (volatile! 0)
@@ -81,10 +89,12 @@
                                     (if while
                                       (while item)
                                       true)))
-        eql           (attr/attributes->eql attributes)
-        selector      (common/pathom-query->datomic-query (vals key->attribute) eql)
+        eql           (when (seq attributes) (attr/attributes->eql attributes))
+        selector      (or selector (common/pathom-query->datomic-query (vals key->attribute) eql))
         filterx       (when predicate (filter predicate))
-        patch-results (map (fn [item] (common/datomic-result->pathom-result key->attribute eql item)))
+        patch-results (if eql
+                        (map (fn [item] (common/datomic-result->pathom-result key->attribute eql item)))
+                        (map identity))
         transducers   (cond-> [stopx patch-results]
                         filterx (conj filterx)
                         :then (conj (take limit)))
