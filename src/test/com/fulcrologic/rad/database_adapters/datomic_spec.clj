@@ -464,7 +464,8 @@
         wrap-env            (-> (attr/wrap-env all-attributes)
                               (common/wrap-env
                                 (fn [_env] {:production *conn*})
-                                d/db)
+                                d/db
+                                datomic/datomic-api)
                               (form/wrap-env save-middleware delete-middleware))
         env                 (wrap-env indexes)
         parser-taking-tx    (partial p.eql/process env)]
@@ -484,7 +485,5 @@
     (component "defattr applies ::pc/transform to the resolver map"
       (assertions
         "person resolver has been transformed by ::pc/transform"
-        (do
-          (log/spy :info person-resolver)
-          (::person/transform-succeeded person-resolver)) => true))))
+        (::person/transform-succeeded person-resolver) => true))))
 

@@ -1,25 +1,26 @@
 {:paths   ["src/main"]
 
- :deps    {edn-query-language/eql     {:mvn/version "1.0.1"}
+ :deps    {edn-query-language/eql     {:mvn/version "1.0.2"}
            com.taoensso/timbre        {:mvn/version "4.10.0"}
            com.taoensso/encore        {:mvn/version "2.120.0"}
-           com.fulcrologic/guardrails {:mvn/version "1.1.4"}
-           com.fulcrologic/fulcro-rad {:mvn/version "1.1.11"}
+           com.fulcrologic/guardrails {:mvn/version "1.1.11"}
+           com.fulcrologic/fulcro-rad {:mvn/version "1.2.7"}
            vvvvalvalval/datomock      {:mvn/version "0.2.2"}
            org.clojure/clojure        {:mvn/version "1.10.1"}}
 
- :aliases {:test      {:extra-paths ["src/test"]
-                       :main-opts   ["-m" "kaocha.runner" "unit"]
-                       :extra-deps  {fulcrologic/fulcro-spec   {:mvn/version "3.1.11"}
-                                     com.wsscode/pathom        {:mvn/version "2.4.0"}
-                                     com.wsscode/pathom3       {:mvn/version "2022.04.20-alpha"}
-                                     lambdaisland/kaocha       {:mvn/version "1.60.977"}
-                                     dev-local-tu/dev-local-tu {:mvn/version "0.1.0"}
-                                     com.datomic/dev-local     {:mvn/version "1.0.243"}
-                                     com.datomic/client-cloud  {:mvn/version "1.0.120"}
-                                     com.datomic/datomic-pro   {:mvn/version "1.0.6165"
-                                                                :exclusions  [org.slf4j/slf4j-nop]}}}
+ :aliases {:test {:extra-paths ["src/test"]
+                  :main-opts   ["-m" "kaocha.runner" "unit"]
+                  :extra-deps  {fulcrologic/fulcro-spec   {:mvn/version "3.1.12"}
+                                com.wsscode/pathom        {:mvn/version "2.4.0"}
+                                com.wsscode/pathom3       {:mvn/version "2022.04.20-alpha"}
+                                org.clojure/test.check    {:mvn/version "1.1.1"}
+                                lambdaisland/kaocha       {:mvn/version "1.69.1069"}
+                                dev-local-tu/dev-local-tu {:mvn/version "0.2.2"}
+                                com.datomic/dev-local     {:mvn/version "1.0.243"}
+                                com.datomic/client-cloud  {:mvn/version "1.0.120"}
+                                com.datomic/datomic-pro   {:mvn/version "1.0.6165"
+                                                           :exclusions  [org.slf4j/slf4j-nop]}}}
 
-           :dev       {:extra-paths ["src/dev" "resources"]
-                       :extra-deps  {org.clojure/tools.namespace {:mvn/version "1.0.0"}
-                                     org.slf4j/slf4j-simple      {:mvn/version "1.7.30"}}}}}
+           :dev  {:extra-paths ["src/dev" "resources"]
+                  :extra-deps  {org.clojure/tools.namespace {:mvn/version "1.3.0"}
+                                org.slf4j/slf4j-simple      {:mvn/version "1.7.30"}}}}}

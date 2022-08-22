@@ -1,171 +1,252 @@
 (ns com.fulcrologic.rad.database-adapters.indexed-access-checks
   (:require
     [cljc.java-time.local-date :as ld]
-    [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.rad.attributes :as attr]
-    [com.fulcrologic.rad.database-adapters.datomic :as datomic]
     [com.fulcrologic.rad.database-adapters.indexed-access :as idx]
+    [com.fulcrologic.rad.pathom :as pathom]
     [com.fulcrologic.rad.ids :as ids]
     [com.fulcrologic.rad.test-schema.index-resolver-schema :as schema]
     [com.fulcrologic.rad.type-support.date-time :as dt]
-    [fulcro-spec.core :refer [specification assertions component =>]]))
+    [fulcro-spec.core :refer [=> assertions component]]
+    [clojure.string :as str]
+    [taoensso.timbre :as log]
+    [com.fulcrologic.rad.database-adapters.datomic-common :as common]
+    [com.fulcrologic.rad.database-adapters.indexed-access :as ia]
+    [com.fulcrologic.rad.database-adapters.datomic-options :as do]))
 
 (def all-attributes schema/attributes)
-(def key->attribute (into {}
-                      (map (fn [{::attr/keys [qualified-key] :as a}]
-                             [qualified-key a]))
-                      all-attributes))
+(def key->attribute (attr/attribute-map all-attributes))
 
-(defn run-checks [{:keys [transact
-                          db
-                          datoms
-                          index-pull
-                          make-connection]}]
-  (let [env {:index-pull           index-pull
-             :datoms               datoms
-             ::attr/key->attribute key->attribute}]
-    (component "Basic indexed access"
-      (let [c          (make-connection all-attributes :main)
-            idA        (ids/new-uuid 1)
-            idB        (ids/new-uuid 2)
-            idC        (ids/new-uuid 3)
-            {{:strs [A B C]} :tempids} (transact c
-                                         {:tx-data
-                                          (into
-                                            [{:db/id "A" :customer/id idA :customer/name "A"}
-                                             {:db/id "B" :customer/id idB :customer/name "B"}
-                                             {:db/id "C" :customer/id idC :customer/name "C"}]
-                                            (map
-                                              (fn [idx]
-                                                (let [c    (mod idx 3)
-                                                      m    (inc (mod idx 12))
-                                                      d    (inc (mod idx 28))
-                                                      cust (case c
-                                                             0 "A"
-                                                             1 "B"
-                                                             2 "C")]
-                                                  {:db/id             (str "P" idx)
-                                                   :purchase/id       (ids/new-uuid (+ 1000 idx))
-                                                   :purchase/date     (dt/local-date->inst "America/Los_Angeles"
-                                                                        (ld/of 2021 m d))
-                                                   :purchase/customer cust
-                                                   :purchase/amount   (+ 10M (* 2.5M idx))}))
-                                              (range 0 1000)))})
-            db         (db c)
-            customerA? (fn [{:purchase/keys [customer]}]
-                         (= {:customer/id idA} customer))]
-        (component "Scanning for a page"
-          (let [{:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer
-                                                {:start      A
-                                                 :limit      10
-                                                 :attributes [schema/purchase-customer]
-                                                 :while      customerA?})]
+(defn run-checks [{:datomic-api/keys [transact db]
+                   :keys             [make-connection generate-resolvers]
+                   :as               api}]
+  (let [env (merge api
+              {::attr/key->attribute key->attribute})]
+    (let [c   (make-connection all-attributes :main)
+          idA (ids/new-uuid 1)
+          idB (ids/new-uuid 2)
+          {{:strs [A B P1 P2 P3 P4 P5 P6]} :tempids} (transact c
+                                                       {:tx-data
+                                                        (into
+                                                          [{:db/id "A" :customer/id idA :customer/name "A"}
+                                                           {:db/id "B" :customer/id idB :customer/name "B"}
+                                                           {:db/id             "P1"
+                                                            :purchase/id       (ids/new-uuid 100)
+                                                            :purchase/date     #inst "2021-01-06T12"
+                                                            :purchase/customer "A"
+                                                            :purchase/amount   -100.0M}
+                                                           {:db/id             "P2"
+                                                            :purchase/id       (ids/new-uuid 101)
+                                                            :purchase/date     #inst "2021-01-05T12"
+                                                            :purchase/customer "A"
+                                                            :purchase/amount   40.0M}
+                                                           {:db/id             "P3"
+                                                            :purchase/id       (ids/new-uuid 102)
+                                                            :purchase/date     #inst "2021-01-04T12"
+                                                            :purchase/customer "A"
+                                                            :purchase/amount   20.0M}
+                                                           {:db/id             "P4"
+                                                            :purchase/id       (ids/new-uuid 103)
+                                                            :purchase/date     #inst "2021-01-03T12"
+                                                            :purchase/customer "A"
+                                                            :purchase/amount   15.0M}
+                                                           {:db/id             "P5"
+                                                            :purchase/id       (ids/new-uuid 104)
+                                                            :purchase/date     #inst "2021-01-02T12"
+                                                            :purchase/customer "A"
+                                                            :purchase/amount   10.0M}
+                                                           {:db/id             "P6"
+                                                            :purchase/id       (ids/new-uuid 105)
+                                                            :purchase/date     #inst "2021-01-01T12"
+                                                            :purchase/customer "B"
+                                                            :purchase/amount   20.0M}])})
+          db  (db c)]
+      (component "Tuple Scan"
+        (let [{:keys [range filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                        (attr/attribute-map schema/attributes)
+                                        {:purchase/customer   A
+                                         :purchase.date/start (ld/of 2021 1 1)
+                                         :purchase.date/end   (ld/of 2021 1 6)})
+              {:keys [start end]} range]
+          (component "Raw access of datoms"
+            (let [{:keys [results next-offset]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                                  start end filters {})]
+              (assertions
+                "finds results"
+                (pos? (count results)) => true
+                "the results are datoms"
+                (str/includes? (str (type (first results))) "Datum") => true
+                "the datoms are in the right order"
+                (mapv :e results) => [P5 P4 P3 P2 P1]
+                "The next offset at the end is -1"
+                next-offset => -1)))
+          (component "Reverse order"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {:reverse? true})]
+              (assertions
+                "the datoms are in the right order"
+                (mapv :e results) => [P1 P2 P3 P4 P5])))
+          (component "As maps"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {:reverse? true
+                                                         :maps?    true})]
+              (assertions
+                "The results are maps with the expected keys directly from the index"
+                results => [{:db/id             P1
+                             :purchase/date     #inst "2021-01-06T12"
+                             :purchase/customer A
+                             :purchase/amount   -100.0M}
+                            {:db/id             P2
+                             :purchase/date     #inst "2021-01-05T12"
+                             :purchase/customer A
+                             :purchase/amount   40.0M}
+                            {:db/id             P3
+                             :purchase/date     #inst "2021-01-04T12"
+                             :purchase/customer A
+                             :purchase/amount   20.0M}
+                            {:db/id             P4
+                             :purchase/date     #inst "2021-01-03T12"
+                             :purchase/customer A
+                             :purchase/amount   15.0M}
+                            {:db/id             P5
+                             :purchase/date     #inst "2021-01-02T12"
+                             :purchase/customer A
+                             :purchase/amount   10.0M}])))
+          (component "As selector"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {:reverse? true
+                                                         :selector [:purchase/id]})]
+              (assertions
+                "The results are pulls from the entities"
+                (mapv #(dissoc % :db/id) results) => [{:purchase/id (ids/new-uuid 100)}
+                                                      {:purchase/id (ids/new-uuid 101)}
+                                                      {:purchase/id (ids/new-uuid 102)}
+                                                      {:purchase/id (ids/new-uuid 103)}
+                                                      {:purchase/id (ids/new-uuid 104)}])))
+          (component "pagination (forward)"
+            (let [
+                  {page1 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:limit 2})
+                  {page2 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:offset next
+                                                            :limit  2})
+                  {page3 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:offset next
+                                                            :limit  2})]
+              (assertions
+                "Gives the expected pages of data"
+                (mapv :e page1) => [P5 P4]
+                (mapv :e page2) => [P3 P2]
+                (mapv :e page3) => [P1]
+                "indicates end"
+                next => -1)))
+          (component "pagination (reverse)"
+            (let [
+                  {page1 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:reverse? true
+
+                                                            :limit    2})
+                  {page2 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:reverse? true
+                                                            :offset   next
+                                                            :limit    2})
+                  {page3 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:reverse? true
+                                                            :offset   next
+                                                            :limit    2})]
+              (assertions
+                "Gives the expected pages of data"
+                (map :e page1) => [P1 P2]
+                (map :e page2) => [P3 P4]
+                (map :e page3) => [P5])))
+          (component "pagination (forward with sorting)"
+            (let [
+                  {page1 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:limit       2
+                                                            :sort-column :purchase/amount})
+                  {page2 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:offset      next
+                                                            :sort-column :purchase/amount
+                                                            :limit       2})
+                  {page3 :results
+                   next  :next-offset} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                         start end filters {:offset      next
+                                                            :sort-column :purchase/amount
+                                                            :limit       2})]
+              (assertions
+                "Gives the expected pages of data"
+                (mapv :e page1) => [P1 P5]
+                (mapv :e page2) => [P4 P3]
+                (mapv :e page3) => [P2]
+                "indicates end"
+                next => -1))))
+        (let [{:keys [range filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                        (attr/attribute-map schema/attributes)
+                                        {:purchase/customer   A
+                                         :purchase/amount     (fn [v] (> v 15.0M))
+                                         :purchase.date/start (ld/of 2021 1 1)
+                                         :purchase.date/end   (ld/of 2021 1 6)})
+              {:keys [start end]} range]
+          (component "Filtering by lambda"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {})]
+              (assertions
+                "Has the correct sub-results"
+                (mapv :e results) => [P3 P2]))))
+        (let [{:keys [range filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                        (attr/attribute-map schema/attributes)
+                                        {:purchase/customer      A
+                                         :purchase.amount/subset #{15.0M 20.0M}
+                                         :purchase.date/start    (ld/of 2021 1 1)
+                                         :purchase.date/end      (ld/of 2021 1 6)})
+              {:keys [start end]} range]
+          (component "Filtering by subset"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {})]
+              (assertions
+                "Has the correct sub-results"
+                (mapv :e results) => [P4 P3]))))
+        (let [{:keys [range filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                        (attr/attribute-map schema/attributes)
+                                        {:purchase/date #inst "2021-01-01T12"})
+              {:keys [start end]} range]
+          (component "with just the first qualifier"
+            (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
+                                      start end filters {})]
+              (assertions
+                "Has the correct sub-results"
+                (mapv :e results) => [P6])))))
+      (component "Pathom indexed access resolver generation"
+        (let [parser       (pathom/new-parser {}
+                             [(attr/pathom-plugin all-attributes)
+                              (common/pathom-plugin (fn [_] {:main c}) (:datomic-api/db api) api)]
+                             [(generate-resolvers all-attributes :main)
+                              (ia/generate-tuple-resolver schema/purchase-date+filters key->attribute 2)])
+              query-params {:purchase.date/start    #inst "2021-01-01T12"
+                            :purchase.date/end      #inst "2021-01-04T12"
+                            :indexed-access/options {:limit    2
+                                                     :offset   1
+                                                     :reverse? true}}
+              env          (merge {} api)]
+          (let [results (parser env [{`(:purchase.date+filters/page ~query-params)
+                                      [:next-offset
+                                       {:results [:purchase/id {:purchase/customer [:customer/id
+                                                                                    :customer/name]}]}]}])]
             (assertions
-              "Scanning for a single customers data gives the correct number of results"
-              (count results) => 10
-              "Indicates where the next offset is"
-              next-offset => 10)))
-        (component "Scanning to the end"
-          (let [{:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer
-                                                {:start      A
-                                                 :limit      1000
-                                                 :attributes [schema/purchase-customer]
-                                                 :while      customerA?})]
-            (assertions
-              "Returns just the items desired"
-              (count results) => 334
-              (every? #(= idA (get-in % [:purchase/customer :customer/id])) results) => true
-              "Returns -1 for the next offset"
-              next-offset => -1)))
-        (component "Starting from a non-native value on a ref (uuid instead of :db/id)"
-          (let [{:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer
-                                                {:start      idB
-                                                 :attributes [schema/purchase-customer]
-                                                 :limit      1})]
-            (assertions
-              "Finds the correct data"
-              (first results) => {:purchase/customer {:customer/id idB}})))
-        (component "Including attributes in the pull"
-          (let [{:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer
-                                                {:start      A
-                                                 :limit      1000
-                                                 :attributes [schema/purchase-customer
-                                                              schema/purchase-date
-                                                              schema/purchase-amount]
-                                                 :while      customerA?})]
-            (assertions
-              "Returns just the items desired"
-              (count results) => 334
-              "The items have the desired result attributes"
-              (first results) => {:purchase/date     (dt/local-date->inst "America/Los_Angeles"
-                                                       (ld/of 2021 1 1))
-                                  :purchase/amount   10M
-                                  :purchase/customer {:customer/id idA}}
-              (every? #(= idA (get-in % [:purchase/customer :customer/id])) results) => true
-              "Returns -1 for the next offset"
-              next-offset => -1)))))
-    (component "Tuple access"
-      (let [c             (make-connection all-attributes :main)
-            idA           (ids/new-uuid 1)
-            idB           (ids/new-uuid 2)
-            idC           (ids/new-uuid 3)
-            {{:strs [A B C]} :tempids} (transact c
-                                         {:tx-data
-                                          (into
-                                            [{:db/id "A" :customer/id idA :customer/name "A"}
-                                             {:db/id "B" :customer/id idB :customer/name "B"}
-                                             {:db/id "C" :customer/id idC :customer/name "C"}]
-                                            (map
-                                              (fn [idx]
-                                                (let [c    (mod idx 3)
-                                                      m    (inc (mod idx 12))
-                                                      d    (inc (mod idx 28))
-                                                      cust (case c
-                                                             0 "A"
-                                                             1 "B"
-                                                             2 "C")]
-                                                  {:db/id             (str "P" idx)
-                                                   :purchase/id       (ids/new-uuid (+ 1000 idx))
-                                                   :purchase/date     (dt/local-date->inst "America/Los_Angeles"
-                                                                        (ld/of 2021 m d))
-                                                   :purchase/customer cust
-                                                   :purchase/amount   (+ 10M (* 2.5M idx))}))
-                                              (range 0 20)))})
-            db            (db c)
-            start-date    (dt/local-date->inst "America/Los_Angeles" (ld/of 2021 2 1))
-            expected-date (dt/local-date->inst "America/Los_Angeles" (ld/of 2021 2 2))]
-        (component "Forward scan"
-          (let [{:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer+date
-                                                {:start      [idB start-date]
-                                                 :limit      1
-                                                 :attributes [schema/purchase-customer
-                                                              schema/purchase-date
-                                                              schema/purchase-amount]})]
-            (assertions
-              "Finds the correct first result with desired attributes"
-              (first results) => {:purchase/customer {:customer/id idB}
-                                  :purchase/date     expected-date
-                                  :purchase/amount   12.5M}
-              "Gives a valid next offset"
-              next-offset => 1)))
-        (component "Reverse scan"
-          (let [start-date (dt/local-date->inst "America/Los_Angeles" (ld/of 2021 3 4))
-                {:keys [results next-offset]} (idx/index-scan db env schema/purchase-customer+date
-                                                {:start      [idB start-date]
-                                                 :reverse?   true
-                                                 :limit      100
-                                                 :while      (fn [item]
-                                                               (= idB (get-in item [:purchase/customer :customer/id])))
-                                                 :attributes [schema/purchase-customer
-                                                              schema/purchase-date
-                                                              schema/purchase-amount]})]
-            (assertions
-              "Finds the correct results in reverse order"
-              results => [#:purchase{:customer
-                                     #:customer{:id idB},
-                                     :date   #inst "2021-02-14T08:00:00.000-00:00",
-                                     :amount 42.5M}
-                          #:purchase{:customer
-                                     #:customer{:id idB},
-                                     :date   #inst "2021-02-02T08:00:00.000-00:00",
-                                     :amount 12.5M}])))))))
+              results => #:purchase.date+filters{:page
+                                                 {:next-offset 3,
+                                                  :results
+                                                  [#:purchase{:id       (ids/new-uuid 103)
+                                                              :customer #:customer{:id   (ids/new-uuid 1)
+                                                                                   :name "A"}}
+                                                   #:purchase{:id       (ids/new-uuid 104)
+                                                              :customer #:customer{:id   (ids/new-uuid 1)
+                                                                                   :name "A"}}]}})))))))

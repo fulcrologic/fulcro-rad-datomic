@@ -42,5 +42,12 @@
                         :db/index      true}
    ao/identities       #{:purchase/id}})
 
+(defattr purchase-date+filters :purchase/date+filters :tuple
+  {ao/schema           :main
+   do/attribute-schema {:db/tupleAttrs [:purchase/date :purchase/customer :purchase/amount]
+                        :db/index      true}
+   ao/identities       #{:purchase/id}})
+
 (def attributes [customer-id customer-name purchase-id purchase-date purchase-amount
-                 purchase-customer purchase-customer+date])
+                 purchase-customer purchase-customer+date
+                 purchase-date+filters])

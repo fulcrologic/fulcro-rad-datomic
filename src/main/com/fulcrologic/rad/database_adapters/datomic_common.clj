@@ -549,16 +549,35 @@
   "Build a (fn [env] env') that adds RAD datomic support to an env. If `base-wrapper` is supplied, then it will be called
    as part of the evaluation, allowing you to build up a chain of environment middleware.
 
+   * base-wrapper. Can be nil. Works like middleware.
+   * database-mapper. (fn [env]  {:schema conn})
+   * connection->db. The Datomic d/db function for your version of Datomic
+   * datomic-api. A map for the API of your Datomic version. com.f.r.datomic-adapters.datomic/datomic-api for On-Prem,
+     or c.f.r.datomic-adapters.datomic-cloud/datomic-api for Client/Cloud.
+
    See attributes/wrap-env for more information.
    "
-  ([database-mapper connection->db] (wrap-env nil database-mapper connection->db))
+  ([database-mapper connection->db]
+   (log/warn "Deprecated wrap-env. Use (wrap-env base mapper c->db datomic-api).")
+   (wrap-env nil database-mapper connection->db))
   ([base-wrapper database-mapper connection->db]
+   (log/warn "Deprecated wrap-env. Use (wrap-env base mapper c->db datomic-api).")
    (fn [env]
      (cond-> (let [database-connection-map (database-mapper env)
                    databases               (enc/map-vals (fn [connection] (atom (connection->db connection))) database-connection-map)]
                (assoc env
                  do/connections database-connection-map
                  do/databases databases))
+       base-wrapper (base-wrapper))))
+  ([base-wrapper database-mapper connection->db datomic-api]
+   (fn [env]
+     (cond-> (let [database-connection-map (database-mapper env)
+                   databases               (enc/map-vals (fn [connection] (atom (connection->db connection))) database-connection-map)]
+               (-> env
+                 (merge datomic-api)
+                 (assoc
+                   do/connections database-connection-map
+                   do/databases databases)))
        base-wrapper (base-wrapper)))))
 
 (defn pathom-plugin
@@ -576,16 +595,26 @@
   - `do/databases`: A map from schema name to atoms holding a database. The atom is present so that
   a mutation that modifies the database can choose to update the snapshot of the db being used for the remaining
   resolvers.
+  - :datomic/api : A map of standardized datomic calls that can be used by internals. See the `datomic-api` definition
+    in the ns of your variant (datomic vs datomic cloud).
 
   This plugin should run before (be listed after) most other plugins in the plugin chain since
   it adds connection details to the parsing env.
   "
-  [database-mapper connection->db]
-  (let [augment (wrap-env database-mapper connection->db)]
-    {:com.wsscode.pathom.core/wrap-parser
-     (fn env-wrap-wrap-parser [parser]
-       (fn env-wrap-wrap-internal [env tx]
-         (parser (augment env) tx)))}))
+  ([database-mapper connection->db]
+   (log/warn "Deprecated use of database-adapters.datomic-common/pathom-plugin (you passed 2 args. 3 are preffered)."
+     "Please include the 3rd argument to pathom-plugin to specify your Datomic API (cloud vs on-prem)")
+   (let [augment (wrap-env database-mapper connection->db)]
+     {:com.wsscode.pathom.core/wrap-parser
+      (fn env-wrap-wrap-parser [parser]
+        (fn env-wrap-wrap-internal [env tx]
+          (parser (augment env) tx)))}))
+  ([database-mapper connection->db datomic-api]
+   (let [augment (wrap-env nil database-mapper connection->db datomic-api)]
+     {:com.wsscode.pathom.core/wrap-parser
+      (fn env-wrap-wrap-parser [parser]
+        (fn env-wrap-wrap-internal [env tx]
+          (parser (augment env) tx)))})))
 
 (defn id->eid
   "Attempt to find the native :db/id for the given RAD reference attribute. For example converting the

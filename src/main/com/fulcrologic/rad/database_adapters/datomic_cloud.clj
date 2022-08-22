@@ -268,23 +268,6 @@
   {do/connections {schema connection}
    do/databases   {schema (atom (d/db connection))}})
 
-(defn ^:deprecated pathom-plugin
-  "Use datomic-common/pathom-plugin or wrap-env, depending on Pathom version.
-
-  A pathom plugin that adds the necessary Datomic connections and databases to the pathom env for
-  a given request. Requires a database-mapper, which is a
-  `(fn [pathom-env] {schema-name connection})` for a given request.
-  The resulting pathom-env available to all resolvers will then have:
-  - `do/connections`: The result of database-mapper
-  - `do/databases` A map from schema name to atoms holding a database. The atom is present so that
-  a mutation that modifies the database can choose to update the snapshot of the db being used for the remaining
-  resolvers.
-  This plugin should run before (be listed after) most other plugins in the plugin chain since
-  it adds connection details to the parsing env.
-  "
-  [database-mapper]
-  (common/pathom-plugin database-mapper d/db))
-
 (defn wrap-datomic-save
   "Form save middleware to accomplish Datomic saves.
 
@@ -333,3 +316,30 @@
   ([]
    (fn [{::form/keys [params] :as pathom-env}]
      (delete-entity! pathom-env params))))
+
+(def datomic-api
+  "Standardized definitions of Datomic functions that are used by common functions of this library, allowing those
+  functions to be coded independent of the Datomic API variations. These are for Cloud/Client"
+  {:datomic-api/datoms      d/datoms
+   :datomic-api/index-pull  d/index-pull
+   :datomic-api/index-range d/index-range
+   :datomic-api/pull-many   pull-many
+   :datomic-api/transact    d/transact
+   :datomic-api/db          d/db})
+
+(defn pathom-plugin
+  "See also datomic-common/pathom-plugin or wrap-env, depending on Pathom version.
+
+  A pathom plugin that adds the necessary Datomic connections and databases to the pathom env for
+  a given request. Requires a database-mapper, which is a
+  `(fn [pathom-env] {schema-name connection})` for a given request.
+  The resulting pathom-env available to all resolvers will then have:
+  - `do/connections`: The result of database-mapper
+  - `do/databases` A map from schema name to atoms holding a database. The atom is present so that
+  a mutation that modifies the database can choose to update the snapshot of the db being used for the remaining
+  resolvers.
+  This plugin should run before (be listed after) most other plugins in the plugin chain since
+  it adds connection details to the parsing env.
+  "
+  [database-mapper]
+  (common/pathom-plugin database-mapper d/db datomic-api))
