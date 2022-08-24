@@ -12,7 +12,8 @@
     [com.fulcrologic.rad.database-adapters.indexed-access-options :as iao]
     [com.fulcrologic.rad.database-adapters.indexed-access :as ia]
     [com.fulcrologic.rad.type-support.date-time :as dt]
-    [taoensso.timbre :as log])
+    [taoensso.timbre :as log]
+    [clojure.set :as set])
   (:import (java.time LocalDate LocalDateTime)
            (java.util Date)))
 
@@ -156,7 +157,7 @@
 (defmethod exclusive-end :default [v] v)
 
 (defn search-parameters->range+filters
-  [pathom-env tuple-attribute k->a search-parameters]
+  [pathom-env tuple-attribute k->a {:keys [row-filter] :as search-parameters}]
   (let [tupleAttrs (get-in tuple-attribute [do/attribute-schema :db/tupleAttrs])
         result     (reduce
                      (fn [{:keys [filtering?] :as acc} k]
@@ -206,17 +207,26 @@
                            :else (assoc acc :filtering? true))))
                      {:filtering? false
                       :range      {:start [] :end []}
-                      :filters    {}}
+                      :filters    (cond-> {}
+                                    row-filter (assoc :row-filter row-filter))}
                      tupleAttrs)]
     ;; If the end of the range is the same constance for start and end, then increment the end
-    (let [result (dissoc result :filtering?)
+    (let [{:keys [range] :as result} (dissoc result :filtering?)
           {:keys [start end]} (:range result)
-          sl     (last start)
-          el     (last end)]
-      (if (and (some? sl) (= sl el))
+          sl (last start)
+          el (last end)]
+      (cond
+        (fn? sl)
+        (let [k         (get tupleAttrs (dec (count start)))
+              next-last (exclusive-end (second (reverse range)))]
+          (-> result
+            (update-in [:range :start] pop)
+            (update-in [:range :end] (comp #(conj % next-last) pop pop))
+            (assoc-in [:filters k] sl)))
+        (and (some? sl) (= sl el))
         (let [next-last (exclusive-end el)]
           (update-in result [:range :end] (comp #(conj % next-last) pop)))
-        result))))
+        :else result))))
 
 (defn tuple-index-scan
   "Given a RAD `tuple-attr` with the `do/attribute-schema` option that specifies `:db/tupleAttrs`: search that tuple via index-range on `db`.
@@ -226,7 +236,9 @@
    `filters` is a map whose keys are attributes in the tuple, and whose values are *either* constant values of that attribute's type, or
    are predicate functions `(fn [v] bool?)` that receive that attribute's value (not the whole tuple). Any attributes that are missing
    in this map will accept any value in the tuple. Using `nil` for a filter value is valid, and will keep only entities for which that
-   attribute is missing.
+   attribute is missing. The special key `:row-filter` can be used in place of tuple keys in order to supply a predicate
+   `(fn [tuple-value] boolean?)`. All filters are combined with AND logic, so using a row-filter is necessary if you want
+   to create more complex row conditions.
 
    `options` can include:
 
@@ -285,31 +297,31 @@
    of `{:invoice/status some-status}`.
    "
   [db {:datomic-api/keys [index-range pull-many] :as env}
-   {::attr/keys [qualified-key] :as tuple-attr} start end filters {:keys [limit offset
-                                                                          reverse?
-                                                                          include-total?
-                                                                          sort-column
-                                                                          maps?
-                                                                          selector] :as options
-                                                                   :or {limit          1000
-                                                                        maps?          false
-                                                                        include-total? false
-                                                                        reverse?       false
-                                                                        offset         0}}]
+   {::attr/keys [qualified-key] :as tuple-attr} start end
+   {:keys [row-filter] :as filters}
+   {:keys [limit offset
+           reverse?
+           include-total?
+           sort-column
+           maps?
+           selector] :as options
+    :or {limit          1000
+         maps?          false
+         include-total? false
+         reverse?       false
+         offset         0}}]
   (let [{:db/keys [tupleAttrs]} (get tuple-attr do/attribute-schema)
         limit          (or limit 1000)
         reverse?       (boolean reverse?)
         offset         (if (number? offset) offset 0)
         a->idx         (zipmap tupleAttrs (range))
         datum-sort-key (when-let [col (a->idx sort-column)]
-                         (fn [{:keys [v]}] (nth v col)))]
+                         (fn [{:keys [v]}] (nth v col)))
+        filter-keys    (set/difference (set (keys filters)) #{:row-filter})]
     (when-not (fn? index-range) (throw (ex-info "Missing index-range in datomic API config" {})))
     (when-not (fn? pull-many) (throw (ex-info "Missing pull-many in datomic API config" {})))
     (when (and (number? limit) (not (pos? limit)))
       (throw (ex-info "Limit must be a positive integer" {})))
-    (when-not (every? (comp int? a->idx) (keys filters))
-      (throw (ex-info "Invalid filters. One or more of the filter keys are NOT in the tuple." {:ks         (keys filters)
-                                                                                               :tupleAttrs tupleAttrs})))
     (when (or (nil? qualified-key) (empty? tupleAttrs))
       (throw (ex-info "tuple-attr must be a RAD attribute with Datomic tuple schema" {})))
     (when (or (not (vector? start)) (empty? start))
@@ -318,60 +330,38 @@
       (throw (ex-info "end must be a vector with at least as many elements as start" {})))
     (let [filter-pred    (fn [{:keys [v]}]
                            (try
-                             (reduce-kv
-                               (fn [_ k pred]
-                                 (let [idx      (a->idx k)
-                                       ev       (get v idx)
-                                       include? (if (fn? pred)
-                                                  (pred ev)
-                                                  (= ev pred))]
-                                   (if include?
-                                     true
-                                     (reduced false))))
-                               true
-                               filters)
+                             (and
+                               (or (nil? row-filter) (row-filter v))
+                               (reduce
+                                 (fn [_ k]
+                                   (let [pred     (get filters k)
+                                         idx      (a->idx k)
+                                         ev       (get v idx)
+                                         include? (if (fn? pred)
+                                                    (pred ev)
+                                                    (= ev pred))]
+                                     (if include?
+                                       true
+                                       (reduced false))))
+                                 true
+                                 filter-keys))
                              (catch Exception e
                                (log/error e "Filter predicate failed"))))
-          counter        (volatile! 0)
-          next-offset    (volatile! (dec offset))
-          predicate-end? (volatile! false)
           sort?          (or reverse? datum-sort-key)
-          raw-items      (if sort?
-                           (drop offset
-                             (cond->> (index-range db {:attrid qualified-key
-                                                       :start  start
-                                                       :end    end
-                                                       :limit  -1})
-                               datum-sort-key (sort-by datum-sort-key)
-                               reverse? reverse))
-                           (index-range db (cond-> {:attrid qualified-key
-                                                    :start  start
-                                                    :end    end
-                                                    :offset offset
-                                                    :limit  -1})))
-          nitems         (when include-total?
-                           (count
-                             (into [] (filter filter-pred)
-                               (index-range db {:attrid qualified-key
-                                                :start  start
-                                                :end    end
-                                                :limit  -1}))))
-          basic-result   (let [results (into []
-                                         (comp
-                                           (map (fn [v] (vswap! next-offset inc) v))
-                                           (filter filter-pred)
-                                           (take-while (fn [_]
-                                                         (vswap! counter inc)
-                                                         (let [range-end? (> @counter limit)]
-                                                           (not range-end?)))))
-                                         raw-items)]
-                           {:next-offset (cond
-                                           @predicate-end? -1
-                                           (> @counter limit) @next-offset
-                                           :else -1)
-                            :results     results})]
-      (cond-> basic-result
-        nitems (assoc :total nitems)
+          raw-items      (index-range db {:attrid qualified-key
+                                          :start  start
+                                          :end    end
+                                          :limit  -1})
+          filtered-items (into [] (filter filter-pred) raw-items)
+          nitems         (count filtered-items)
+          sorted-items   (if sort?
+                           (cond->> filtered-items
+                             datum-sort-key (sort-by datum-sort-key)
+                             reverse? reverse)
+                           filtered-items)
+          page           (into [] (take limit (drop offset sorted-items)))]
+      (cond-> {:results page
+               :total   nitems}
         (and maps? (not selector)) (update :results (fn [datoms]
                                                       (mapv (fn [{:keys [e v]}] (assoc
                                                                                   (zipmap tupleAttrs v)
@@ -395,7 +385,8 @@
 
    WARNING: Does not yet support attributes that use native IDs.
    "
-  [{::attr/keys [schema qualified-key identities] :as tuple-attribute} key->attribute pathom-version]
+  [{::keys      [pathom-env->search-params]
+    ::attr/keys [schema qualified-key identities] :as tuple-attribute} key->attribute pathom-version]
   (let [tupleAttrs       (get-in tuple-attribute [do/attribute-schema :db/tupleAttrs])
         selector         (mapv
                            (fn [k]
@@ -413,7 +404,9 @@
                              (r (assoc env :com.wsscode.pathom.connect/sym (symbol resolver-sym)) input)))
         resolve-fn       (fn [{::attr/keys [key->attribute] :as pathom-env} _]
                            (let [{:indexed-access/keys [options]
-                                  :as                  search-params} (:query-params pathom-env)
+                                  :as                  search-params} (if pathom-env->search-params
+                                                                        (pathom-env->search-params pathom-env)
+                                                                        (:query-params pathom-env))
                                  search-params (dissoc search-params :indexed-access/options)
                                  db            (some-> (get-in pathom-env [do/databases schema]) deref)
                                  {{:keys [start end]} :range
@@ -421,7 +414,7 @@
                                                                    key->attribute search-params)
                                  result        (try
                                                  (ia/tuple-index-scan db pathom-env tuple-attribute
-                                                   start end filters
+                                                   (log/spy :debug start) (log/spy :debug end) (log/spy :debug filters)
                                                    (merge {:selector selector} options))
                                                  (catch Exception e
                                                    (log/error (ex-message e))
