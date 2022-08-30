@@ -5,7 +5,6 @@
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.database-adapters.indexed-access-checks :as checks :refer [run-checks]]
     [com.fulcrologic.rad.type-support.date-time :as dt]
-    [datomic.client.api :as d]
     [dev-local-tu.core :as dev-local-tu]
     [fulcro-spec.core :refer [specification]]))
 

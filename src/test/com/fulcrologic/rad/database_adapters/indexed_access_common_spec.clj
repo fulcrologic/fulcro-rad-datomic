@@ -6,7 +6,7 @@
     [clojure.test.check :as tc]
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop :include-macros true]
-    [com.fulcrologic.rad.attributes :refer [defattr]]
+    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.database-adapters.indexed-access :as ia]
     [com.fulcrologic.rad.type-support.date-time :as dt]
@@ -17,6 +17,8 @@
     (dt/with-timezone "America/Los_Angeles"
       (t))))
 
+(def mock-env {::attr/key->attribute {}})
+
 (def default-coercion-acts-as-identity-function
   (prop/for-all [v (gen/one-of
                      [gen/small-integer
@@ -25,7 +27,7 @@
                       gen/double
                       gen/string])
                  k gen/keyword]
-    (= v (ia/default-coercion {} k v))))
+    (= v (ia/default-coercion mock-env k k v))))
 
 (specification "default-coercion"
   (assertions
@@ -36,16 +38,16 @@
       (let [dt (ld/of 2020 1 4)]
         (assertions
           "Converts to a local inst for most keys"
-          (ia/default-coercion {} :x dt) => #inst "2020-01-04T08:00:00"
+          (ia/default-coercion mock-env :x :x dt) => #inst "2020-01-04T08:00:00"
           "If the keyword has the name `end`, sets it to end of day"
-          (ia/default-coercion {} :x/end dt) => #inst "2020-01-05T08:00:00"))))
+          (ia/default-coercion mock-env :x/end :x dt) => #inst "2020-01-05T08:00:00"))))
   (component "Local Date-time coercion"
     (dt/with-timezone "America/Los_Angeles"
       (let [dt (ldt/of 2020 1 4 12 30 0)]
         (assertions
           "Converts to a local inst"
-          (ia/default-coercion {} :x dt) => #inst "2020-01-04T20:30:00"
-          (ia/default-coercion {} :x/end dt) => #inst "2020-01-04T20:30:00")))))
+          (ia/default-coercion {} :x :x dt) => #inst "2020-01-04T20:30:00"
+          (ia/default-coercion {} :x/end :x dt) => #inst "2020-01-04T20:30:00")))))
 
 (def exclusive-end-string-gives-next-string
   (prop/for-all [start gen/string

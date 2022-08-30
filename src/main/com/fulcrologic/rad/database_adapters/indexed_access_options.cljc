@@ -5,7 +5,7 @@
    use a control that returns a data type that doesn't match the low-level database type.
    For example you may use LocalDate for an inst.
 
-   This option allows you to specify a `(fn [pathom-env ui-key value] attribute-value)` to
+   This option allows you to specify a `(fn [pathom-env ui-key attr-key value] attribute-value)` to
    convert the UI data into the low-level type that the indexed access system can use.
 
    See also `com.fulcrologic.rad.database-adapters.indexed-access/default-coercion` for
