@@ -1,8 +1,5 @@
 = Datomic Database Plugin
 
-This library is may have out-of-date documentation. See the current version of the https://github.com/fulcrologic/fulcro-rad-demo[Fulcro RAD Demo]
-for an accurate representation of usage.
-
 image:https://img.shields.io/clojars/v/com.fulcrologic/fulcro-rad-datomic.svg[link=https://clojars.org/com.fulcrologic/fulcro-rad-datomic]
 
 This is a plugin for Fulcro RAD that adds support for using Datomic databases as the back-end technology.
@@ -16,9 +13,6 @@ sure you use something like:
 {:deps {com.fulcrologic/fulcro-rad-datomic {:mvn/version "x.x.x"
                                             :exclusions  [com.datomic/datomic-free]}}}
 -----
-
-WARNING: This README may be out of date.
-
 
 == Conventions
 
@@ -156,6 +150,18 @@ in the context of the current request.
 should be used in the context of the current request (for consistent reads across multiple resolvers).
 
 TODO: Supply helper funtions that can help with this
+
+== Indexed Access (Version 1.3.1+)
+
+Prior versions had experimental versions of approaches to fast indexed access for RAD reports. Version 1.3.1 and
+above have a stabilized version of this that works well with the RAD report `server-paginate-report` UI state machine.
+This support includes:
+
+* A function that can grab a page of sorted/filtered data from a tuple `tuple-index-scan` using a range and filters against
+  an `datomic/index-range`.
+* A helper function for converting RAD report search parameters into parameters acceptable for use with `tuple-index-scan`.
+* A function to generate a resolver that can use a tuple plus d/index-range to quick find a page of data, and which
+ conforms to the new server-paginated-report machine in RAD.
 
 == Testing
 
