@@ -270,6 +270,13 @@
                                                      {:start (conj start minimum)
                                                       :end   (conj end maximum)})))
 
+                            (some? maximum) (-> acc
+                                                 (assoc :filtering? true)
+                                                 (update :range
+                                                   (fn [{:keys [start end]}]
+                                                     {:start (conj start nil)
+                                                      :end   (conj end maximum)})))
+
                             :else (assoc acc :filtering? true))))
                       {:filtering? false
                        :range      {:start [] :end []}
