@@ -4,7 +4,7 @@ image:https://img.shields.io/clojars/v/com.fulcrologic/fulcro-rad-datomic.svg[li
 
 This is a plugin for Fulcro RAD that adds support for using Datomic databases as the back-end technology.
 
-NOTE: The current version supports on-prem Datomic Pro (PostgreSQL or MySQL backends), Datomic Free, or Mem stores, as well as Datomic Cloud. Make sure
+NOTE: The current version supports on-prem Datomic Pro (PostgreSQL, MySQL, or Microsoft SQL Server backends), Datomic Free, or Mem stores, as well as Datomic Cloud. Make sure
 you do not accidentally get Datomic Free and Datomic Pro BOTH on the CLASSPATH. If you're using deps you should make
 sure you use something like:
 
@@ -224,7 +224,7 @@ edit the `defaults.edn` file in `src/example/config` and update the database par
 ```
  :com.fulcrologic.rad.database-adapters.datomic/databases
     {:main {:datomic/schema           :production
-            :datomic/driver           :postgresql ;; OR :mysql :free :mem
+            :datomic/driver           :postgresql ;; OR :mysql :sqlserver :free :mem
             :datomic/database         "example"
             :datomic/prevent-changes? true
             :postgresql/host          "localhost"

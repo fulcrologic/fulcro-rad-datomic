@@ -159,6 +159,22 @@
   (str "datomic:sql://" datomic-db "?jdbc:mysql://" host (when port (str ":" port)) "/"
     database "?user=" user "&password=" password "&useSSL=false"))
 
+(defn config->sqlserver-url [{:sqlserver/keys [host port user password
+                                               database properties]
+                             datomic-db       :datomic/database
+                             :or              {datomic-db "demo"}}]
+  (let [all-properties (cond-> {}
+                         user (assoc "Username" user)
+                         password (assoc "Password" password)
+                         database (assoc "DatabaseName" database)
+                         properties (merge properties))
+        properties-str (reduce-kv (fn [p k v] (str p ";" k "=" v))
+                                  ""
+                                  all-properties)]
+    (str "datomic:sql://" datomic-db "?jdbc:sqlserver://"
+         (str host (when port (str ":" port)))
+         properties-str)))
+
 (defn config->free-url [{:free/keys [host port]
                          datomic-db :datomic/database}]
   (assert host ":free/host must be specified")
@@ -181,6 +197,7 @@
     :dev (config->dev-url config)
     :postgresql (config->postgres-url config)
     :mysql (config->mysql-url config)
+    :sqlserver (config->sqlserver-url config)
     (throw (ex-info "Unsupported Datomic driver." {:driver driver}))))
 
 (defn ensure-transactor-functions!
