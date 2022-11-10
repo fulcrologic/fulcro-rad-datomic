@@ -12,8 +12,7 @@
     [com.fulcrologic.rad.options-util :refer [narrow-keyword]]
     [com.fulcrologic.rad.type-support.date-time :as dt]
     [edn-query-language.core :as eql]
-    [taoensso.timbre :as log]
-    [taoensso.tufte :refer [p]])
+    [taoensso.timbre :as log])
   (:import (java.time LocalDate LocalDateTime)
            (java.util Date)))
 
@@ -271,11 +270,11 @@
                                                       :end   (conj end maximum)})))
 
                             (some? maximum) (-> acc
-                                                 (assoc :filtering? true)
-                                                 (update :range
-                                                   (fn [{:keys [start end]}]
-                                                     {:start (conj start nil)
-                                                      :end   (conj end maximum)})))
+                                              (assoc :filtering? true)
+                                              (update :range
+                                                (fn [{:keys [start end]}]
+                                                  {:start (conj start nil)
+                                                   :end   (conj end maximum)})))
 
                             :else (assoc acc :filtering? true))))
                       {:filtering? false
@@ -386,70 +385,65 @@
          include-total? false
          reverse?       false
          offset         0}}]
-  (p `tuple-index-scan
-    (let [{:db/keys [tupleAttrs]} (get tuple-attr do/attribute-schema)
-          limit          (or limit 1000)
-          reverse?       (boolean reverse?)
-          offset         (if (number? offset) offset 0)
-          a->idx         (zipmap tupleAttrs (range))
-          datum-sort-key (when-let [col (a->idx sort-column)]
-                           (fn [{:keys [v]}] (nth v col)))
-          filter-keys    (set/difference (set (keys filters)) #{:row-filter})]
-      (when-not (fn? index-range) (throw (ex-info "Missing index-range in datomic API config" {})))
-      (when-not (fn? pull-many) (throw (ex-info "Missing pull-many in datomic API config" {})))
-      (when (and (number? limit) (not (pos? limit)))
-        (throw (ex-info "Limit must be a positive integer" {})))
-      (when (or (nil? qualified-key) (empty? tupleAttrs))
-        (throw (ex-info "tuple-attr must be a RAD attribute with Datomic tuple schema" {})))
-      (when (or (not (vector? start)) (empty? start))
-        (throw (ex-info "start must be a vector of at least one element that specifies the lower range of the scan" {})))
-      (when (or (not (vector? end)) (< (count end) (count start)))
-        (throw (ex-info "end must be a vector with at least as many elements as start" {})))
-      (let [filter-pred    (fn [{:keys [v]}]
-                             (try
-                               (and
-                                 (or (nil? row-filter) (row-filter v))
-                                 (reduce
-                                   (fn [_ k]
-                                     (let [pred     (get filters k)
-                                           idx      (a->idx k)
-                                           ev       (get v idx)
-                                           include? (if (fn? pred)
-                                                      (pred ev)
-                                                      (= ev pred))]
-                                       (if include?
-                                         true
-                                         (reduced false))))
-                                   true
-                                   filter-keys))
-                               (catch Exception e
-                                 (log/error e "Filter predicate failed"))))
-            sort?          (or reverse? datum-sort-key)
-            raw-items      (p `tuple-index-scan-index-range
-                             (index-range db {:attrid qualified-key
-                                              :start  start
-                                              :end    end
-                                              :limit  -1}))
-            filtered-items (p `tuple-index-scan-filter
-                             (into [] (filter filter-pred) raw-items))
-            nitems         (count filtered-items)
-            sorted-items   (if sort?
-                             (p `tuple-index-scan-sort
-                               (cond->> filtered-items
-                                 datum-sort-key (sort-by datum-sort-key)
-                                 reverse? reverse))
-                             filtered-items)
-            page           (into [] (take limit (drop offset sorted-items)))]
-        (cond-> {:results page
-                 :total   nitems}
-          (and maps? (not selector)) (update :results (fn [datoms]
-                                                        (mapv (fn [{:keys [e v]}] (assoc
-                                                                                    (zipmap tupleAttrs v)
-                                                                                    :db/id e)) datoms)))
-          (vector? selector) (update :results (fn [datoms]
-                                                (let [ids (into [] (map :e) datoms)]
-                                                  (p `tuple-index-scan-pull-many
-                                                    (pull-many db selector ids))))))))))
+  (let [{:db/keys [tupleAttrs]} (get tuple-attr do/attribute-schema)
+        limit          (or limit 1000)
+        reverse?       (boolean reverse?)
+        offset         (if (number? offset) offset 0)
+        a->idx         (zipmap tupleAttrs (range))
+        datum-sort-key (when-let [col (a->idx sort-column)]
+                         (fn [{:keys [v]}] (nth v col)))
+        filter-keys    (set/difference (set (keys filters)) #{:row-filter})]
+    (when-not (fn? index-range) (throw (ex-info "Missing index-range in datomic API config" {})))
+    (when-not (fn? pull-many) (throw (ex-info "Missing pull-many in datomic API config" {})))
+    (when (and (number? limit) (not (pos? limit)))
+      (throw (ex-info "Limit must be a positive integer" {})))
+    (when (or (nil? qualified-key) (empty? tupleAttrs))
+      (throw (ex-info "tuple-attr must be a RAD attribute with Datomic tuple schema" {})))
+    (when (or (not (vector? start)) (empty? start))
+      (throw (ex-info "start must be a vector of at least one element that specifies the lower range of the scan" {})))
+    (when (or (not (vector? end)) (< (count end) (count start)))
+      (throw (ex-info "end must be a vector with at least as many elements as start" {})))
+    (let [filter-pred    (fn [{:keys [v]}]
+                           (try
+                             (and
+                               (or (nil? row-filter) (row-filter v))
+                               (reduce
+                                 (fn [_ k]
+                                   (let [pred     (get filters k)
+                                         idx      (a->idx k)
+                                         ev       (get v idx)
+                                         include? (if (fn? pred)
+                                                    (pred ev)
+                                                    (= ev pred))]
+                                     (if include?
+                                       true
+                                       (reduced false))))
+                                 true
+                                 filter-keys))
+                             (catch Exception e
+                               (log/error e "Filter predicate failed"))))
+          sort?          (or reverse? datum-sort-key)
+          raw-items      (index-range db {:attrid qualified-key
+                                          :start  start
+                                          :end    end
+                                          :limit  -1})
+          filtered-items (into [] (filter filter-pred) raw-items)
+          nitems         (count filtered-items)
+          sorted-items   (if sort?
+                           (cond->> filtered-items
+                             datum-sort-key (sort-by datum-sort-key)
+                             reverse? reverse)
+                           filtered-items)
+          page           (into [] (take limit (drop offset sorted-items)))]
+      (cond-> {:results page
+               :total   nitems}
+        (and maps? (not selector)) (update :results (fn [datoms]
+                                                      (mapv (fn [{:keys [e v]}] (assoc
+                                                                                  (zipmap tupleAttrs v)
+                                                                                  :db/id e)) datoms)))
+        (vector? selector) (update :results (fn [datoms]
+                                              (let [ids (into [] (map :e) datoms)]
+                                                (pull-many db selector ids))))))))
 
 (defn generate-tuple-resolver
   "Generate a Datomic resolver.
