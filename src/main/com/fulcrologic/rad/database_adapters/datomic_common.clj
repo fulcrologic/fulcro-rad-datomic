@@ -230,13 +230,16 @@
     fulcro-tempid->generated-id))
 
 (>defn delta->txn
-  [env schema delta]
+  [{::attr/keys [key->attribute] :as env} target-schema delta]
   [map? keyword? map? => map?]
   (let [tempid->txid                 (tempid->intermediate-id env delta)
         tempid->generated-id         (tempids->generated-ids env delta)
         non-native-id-attributes-txn (keep
                                        (fn [[k id :as ident]]
-                                         (when (and (tempid/tempid? id) (uuid-ident? env ident))
+                                         (when (and
+                                                 (tempid/tempid? id)
+                                                 (= target-schema (-> k key->attribute ::attr/schema))
+                                                 (uuid-ident? env ident))
                                            [:db/add (tempid->txid id) k (tempid->generated-id id)]))
                                        (keys delta))]
     {:tempid->string       tempid->txid
@@ -244,8 +247,8 @@
      :txn                  (into []
                              (concat
                                non-native-id-attributes-txn
-                               (to-one-txn env schema delta)
-                               (to-many-txn env schema delta)))}))
+                               (to-one-txn env target-schema delta)
+                               (to-many-txn env target-schema delta)))}))
 
 (defn- attribute-schema [attributes]
   (mapv
