@@ -35,9 +35,26 @@
    :uuid     :db.type/uuid
    :uri      :db.type/uri})
 
+(defn- flatten-unions
+  ([query]
+   (walk/prewalk
+     (fn [ele]
+       (if (and
+             (map? ele)
+             (= 1 (count ele))
+             (map? (first (vals ele))))
+         (let [join-key (ffirst ele)
+               union    (-> ele vals first)
+               queries  (vals union)
+               items    (into #{} (apply concat queries))]
+           {join-key (vec items)})
+         ele))
+     query)))
+
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
-  (let [native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
+  (let [pull-query (flatten-unions pathom-query)
+        native-id? #(and (true? (do/native-id? %)) (true? (::attr/identity? %)))
         native-ids (into #{}
                      (comp
                        (filter native-id?)
@@ -46,7 +63,7 @@
     (walk/prewalk (fn [e]
                     (if (and (keyword? e) (contains? native-ids e))
                       :db/id
-                      e)) pathom-query)))
+                      e)) pull-query)))
 
 (defn- fix-id-keys
   "Fix the ID keys recursively on result."
