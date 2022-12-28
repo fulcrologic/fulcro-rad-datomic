@@ -100,7 +100,7 @@
             (swap! result update :tempids merge tempid->real-id))
           (catch Exception e
             (log/error e "Transaction failed!")
-            {}))
+            (throw e)))
         (log/error "Unable to save form. Either connection was missing in env, or txn was empty.")))
     @result))
 
