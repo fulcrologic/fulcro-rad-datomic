@@ -516,7 +516,7 @@
     (let [wrap-resolve (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
           resolve-sym  (symbol
                          (str (namespace qualified-key))
-                         (str (name qualified-key) "-resolver"))
+                         (str (name qualified-key) "-resolver-datomic"))
           resolver-fn  (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
                                  (->> (entity-query*
                                         pull-fn pull-many-fn datoms-for-id-fn
