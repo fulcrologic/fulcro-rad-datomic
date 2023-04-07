@@ -143,7 +143,7 @@
   - A keyword if it is a keyword (a :db/ident)
   "
   [{::attr/keys [key->attribute] :as env} ident]
-  (if (keyword? ident)
+  (if (or (keyword? ident) (int? ident))
     ident
     (let [[_ id] ident]
       (cond
