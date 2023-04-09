@@ -463,14 +463,16 @@
   [{::keys      [pathom-env->search-params]
     ::attr/keys [schema qualified-key identities] :as tuple-attribute} key->attribute pathom-version]
   (let [tupleAttrs       (get-in tuple-attribute [do/attribute-schema :db/tupleAttrs])
-        selector         (mapv
-                           (fn [k]
-                             (if-let [{::attr/keys [type target]} (some-> k key->attribute)]
-                               (if (= type :ref)
-                                 {k [target]}
-                                 k)
-                               k))
-                           (into tupleAttrs identities))
+        selector         (vec
+                           (into #{}
+                             (map
+                               (fn [k]
+                                 (if-let [{::attr/keys [type target]} (some-> k key->attribute)]
+                                   (if (= type :ref)
+                                     {k [target]}
+                                     k)
+                                   k)))
+                             (into tupleAttrs identities)))
         resolver-key     (get tuple-attribute iao/resolver-key (narrow-keyword qualified-key "page"))
         resolver-sym     (symbol (get tuple-attribute iao/resolver-key (narrow-keyword qualified-key "page-resolver")))
         outputs          [{resolver-key [{:results selector} :next-offset]}]
