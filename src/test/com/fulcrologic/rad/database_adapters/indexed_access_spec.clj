@@ -3,9 +3,8 @@
     [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.rad.database-adapters.datomic :as datomic]
     [com.fulcrologic.rad.database-adapters.indexed-access-checks :refer [run-checks]]
-    [datomic.api :as d]
-    [fulcro-spec.core :refer [specification]]
-    [com.fulcrologic.rad.type-support.date-time :as dt]))
+    [com.fulcrologic.rad.type-support.date-time :as dt]
+    [fulcro-spec.core :refer [specification]]))
 
 (use-fixtures :once
   (fn [t]

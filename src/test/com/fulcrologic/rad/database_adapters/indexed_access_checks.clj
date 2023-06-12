@@ -41,6 +41,7 @@
                                                           :purchase/id       (ids/new-uuid 102)
                                                           :purchase/date     #inst "2021-01-04T12"
                                                           :purchase/customer "A"
+                                                          :purchase/shipped? true
                                                           :purchase/amount   20.0M}
                                                          {:db/id             "P4"
                                                           :purchase/id       (ids/new-uuid 103)
@@ -51,10 +52,12 @@
                                                           :purchase/id       (ids/new-uuid 104)
                                                           :purchase/date     #inst "2021-01-02T12"
                                                           :purchase/customer "A"
+                                                          :purchase/shipped? true
                                                           :purchase/amount   10.0M}
                                                          {:db/id             "P6"
                                                           :purchase/id       (ids/new-uuid 105)
                                                           :purchase/date     #inst "2021-01-01T12"
+                                                          :purchase/shipped? false
                                                           :purchase/customer "B"
                                                           :purchase/amount   20.0M}])})
         db  (c->db c)
@@ -100,6 +103,7 @@
                            :purchase/amount   40.0M}
                           {:db/id             P3
                            :purchase/date     #inst "2021-01-04T12"
+                           :purchase/shipped? true
                            :purchase/customer A
                            :purchase/amount   20.0M}
                           {:db/id             P4
@@ -108,6 +112,7 @@
                            :purchase/amount   15.0M}
                           {:db/id             P5
                            :purchase/date     #inst "2021-01-02T12"
+                           :purchase/shipped? true
                            :purchase/customer A
                            :purchase/amount   10.0M}])))
         (component "As selector"
@@ -266,15 +271,49 @@
                                                    :offset   1
                                                    :reverse? true}}
             env          (merge {} api)]
-        (let [results (parser env [{`(:purchase.date+filters/page ~query-params)
-                                    [{:results [:purchase/id {:purchase/customer [:customer/id
-                                                                                  :customer/name]}]}]}])]
-          (assertions
-            results => #:purchase.date+filters{:page
-                                               {:results
-                                                [#:purchase{:id       (ids/new-uuid 103)
-                                                            :customer #:customer{:id   (ids/new-uuid 1)
-                                                                                 :name "A"}}
-                                                 #:purchase{:id       (ids/new-uuid 104)
-                                                            :customer #:customer{:id   (ids/new-uuid 1)
-                                                                                 :name "A"}}]}}))))))
+        (component "Normal parameters"
+          (let [results (parser env [{`(:purchase.date+filters/page ~query-params)
+                                      [{:results [:purchase/id {:purchase/customer [:customer/id
+                                                                                    :customer/name]}]}]}])]
+            (assertions
+              results => #:purchase.date+filters{:page
+                                                 {:results
+                                                  [#:purchase{:id       (ids/new-uuid 103)
+                                                              :customer #:customer{:id   (ids/new-uuid 1)
+                                                                                   :name "A"}}
+                                                   #:purchase{:id       (ids/new-uuid 104)
+                                                              :customer #:customer{:id   (ids/new-uuid 1)
+                                                                                   :name "A"}}]}})))
+        (component "Boolean parameters"
+          (let [query-params {:purchase/shipped?      false
+                              :purchase.date/start    #inst "2021-01-01T12"
+                              :purchase.date/end      #inst "2021-02-01T12"
+                              :indexed-access/options {:limit 5}}
+                results      (parser env [{`(:purchase.date+filters/page ~query-params)
+                                           [{:results [:purchase/id :purchase/amount]}]}])]
+            (assertions
+              "False matches nil"
+              results => #:purchase.date+filters{:page
+                                                 {:results
+                                                  [{:purchase/id     (ids/new-uuid 105)
+                                                    :purchase/amount 20.0M}
+                                                   {:purchase/id     (ids/new-uuid 103)
+                                                    :purchase/amount 15.0M}
+                                                   {:purchase/id     (ids/new-uuid 101)
+                                                    :purchase/amount 40.0M}
+                                                   {:purchase/id     (ids/new-uuid 100)
+                                                    :purchase/amount -100.0M}]}}))
+          (let [query-params {:purchase/shipped?      true
+                              :purchase.date/start    #inst "2021-01-01T12"
+                              :purchase.date/end      #inst "2021-02-01T12"
+                              :indexed-access/options {:limit 5}}
+                results      (parser env [{`(:purchase.date+filters/page ~query-params)
+                                           [{:results [:purchase/id :purchase/amount]}]}])]
+            (assertions
+              "True only matches true"
+              results => #:purchase.date+filters{:page
+                                                 {:results
+                                                  [#:purchase{:id     (ids/new-uuid 104)
+                                                              :amount 10.0M}
+                                                   #:purchase{:id     (ids/new-uuid 102)
+                                                              :amount 20.0M}]}})))))))

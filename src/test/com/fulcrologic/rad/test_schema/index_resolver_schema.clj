@@ -29,6 +29,11 @@
    do/attribute-schema {:db/index true}
    ao/identities       #{:purchase/id}})
 
+(defattr purchase-shipped? :purchase/shipped? :boolean
+  {ao/schema           :main
+   do/attribute-schema {:db/index true}
+   ao/identities       #{:purchase/id}})
+
 (defattr purchase-customer :purchase/customer :ref
   {ao/schema           :main
    ao/required?        true
@@ -44,10 +49,10 @@
 
 (defattr purchase-date+filters :purchase/date+filters :tuple
   {ao/schema           :main
-   do/attribute-schema {:db/tupleAttrs [:purchase/date :purchase/customer :purchase/amount]
+   do/attribute-schema {:db/tupleAttrs [:purchase/date :purchase/customer :purchase/shipped? :purchase/amount]
                         :db/index      true}
    ao/identities       #{:purchase/id}})
 
 (def attributes [customer-id customer-name purchase-id purchase-date purchase-amount
-                 purchase-customer purchase-customer+date
+                 purchase-customer purchase-shipped? purchase-customer+date
                  purchase-date+filters])

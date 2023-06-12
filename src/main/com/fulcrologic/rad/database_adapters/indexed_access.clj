@@ -12,6 +12,7 @@
     [com.fulcrologic.rad.options-util :refer [narrow-keyword]]
     [com.fulcrologic.rad.type-support.date-time :as dt]
     [edn-query-language.core :as eql]
+    [taoensso.encore :as enc]
     [taoensso.timbre :as log])
   (:import (java.time LocalDate LocalDateTime)
            (java.util Date)))
@@ -210,7 +211,7 @@
      that value to derive the end. This has built-in implementations for String (add \u0000 to the end), Date (+ 1ms),
      Integer, and Long (inc).
    * The `iao/coerce` setting on attribute within the tuple (e.g. tuple contains :invoice/date, then the attribute invoice-date
-     is the one we mean), then that function will be used to coerce the incoming search paramter to a compatible value. The
+     is the one we mean), then that function will be used to coerce the incoming search parameter to a compatible value. The
      `default-coercion` handles:
      ** fixing UUID/idents on refs
      ** LocalDateTime (to inst)
@@ -412,9 +413,10 @@
                                    (let [pred     (get filters k)
                                          idx      (a->idx k)
                                          ev       (get v idx)
-                                         include? (if (fn? pred)
-                                                    (pred ev)
-                                                    (= ev pred))]
+                                         include? (cond
+                                                    (fn? pred) (pred ev)
+                                                    (false? pred) (or (nil? ev) (false? ev))
+                                                    :else (= ev pred))]
                                      (if include?
                                        true
                                        (reduced false))))
@@ -439,7 +441,7 @@
                :total   nitems}
         (and maps? (not selector)) (update :results (fn [datoms]
                                                       (mapv (fn [{:keys [e v]}] (assoc
-                                                                                  (zipmap tupleAttrs v)
+                                                                                  (enc/remove-vals nil? (zipmap tupleAttrs v))
                                                                                   :db/id e)) datoms)))
         (vector? selector) (update :results (fn [datoms]
                                               (let [ids (into [] (map :e) datoms)]
@@ -491,7 +493,7 @@
                                                                    search-params)
                                  result        (try
                                                  (tuple-index-scan db pathom-env tuple-attribute
-                                                   (log/spy :debug start) (log/spy :debug end) (log/spy :debug filters)
+                                                   start end filters
                                                    (merge {:selector selector} options))
                                                  (catch Exception e
                                                    (log/error (ex-message e))
