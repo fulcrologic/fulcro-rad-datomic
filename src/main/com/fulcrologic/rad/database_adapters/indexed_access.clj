@@ -256,6 +256,10 @@
 
                             filtering? acc
 
+                            (boolean? value) (-> acc
+                                               (assoc :filtering? true)
+                                               (update :filters assoc k value))
+
                             (some? value) (-> acc
                                             (update :range
                                               (fn [{:keys [start end]}]
@@ -410,14 +414,14 @@
                                (or (nil? row-filter) (row-filter v))
                                (reduce
                                  (fn [_ k]
-                                   (let [pred     (get filters k)
+                                   (let [pred     (log/spy :info "pred" (get filters k))
                                          idx      (a->idx k)
-                                         ev       (get v idx)
+                                         ev       (log/spy :info "ev" (get v idx))
                                          include? (cond
                                                     (fn? pred) (pred ev)
                                                     (false? pred) (or (nil? ev) (false? ev))
                                                     :else (= ev pred))]
-                                     (if include?
+                                     (if (log/spy :info include?)
                                        true
                                        (reduced false))))
                                  true
@@ -426,8 +430,8 @@
                                (log/error e "Filter predicate failed"))))
           sort?          (or reverse? datum-sort-key)
           raw-items      (index-range db {:attrid qualified-key
-                                          :start  start
-                                          :end    end
+                                          :start  (log/spy :info start)
+                                          :end    (log/spy :info end)
                                           :limit  -1})
           filtered-items (into [] (filter filter-pred) raw-items)
           nitems         (count filtered-items)
