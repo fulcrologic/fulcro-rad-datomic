@@ -414,14 +414,14 @@
                                (or (nil? row-filter) (row-filter v))
                                (reduce
                                  (fn [_ k]
-                                   (let [pred     (log/spy :info "pred" (get filters k))
+                                   (let [pred     (get filters k)
                                          idx      (a->idx k)
-                                         ev       (log/spy :info "ev" (get v idx))
+                                         ev       (get v idx)
                                          include? (cond
                                                     (fn? pred) (pred ev)
                                                     (false? pred) (or (nil? ev) (false? ev))
                                                     :else (= ev pred))]
-                                     (if (log/spy :info include?)
+                                     (if include?
                                        true
                                        (reduced false))))
                                  true
@@ -430,8 +430,8 @@
                                (log/error e "Filter predicate failed"))))
           sort?          (or reverse? datum-sort-key)
           raw-items      (index-range db {:attrid qualified-key
-                                          :start  (log/spy :info start)
-                                          :end    (log/spy :info end)
+                                          :start  start
+                                          :end    end
                                           :limit  -1})
           filtered-items (into [] (filter filter-pred) raw-items)
           nitems         (count filtered-items)
@@ -503,7 +503,7 @@
                                                    (log/error (ex-message e))
                                                    []))]
                              {resolver-key result}))]
-    (log/info "Generating indexed access resolver for" qualified-key "using output" outputs)
+    (log/debug "Generating indexed access resolver for" qualified-key "using output" outputs)
     (case pathom-version
       2 {:com.wsscode.pathom.connect/sym     resolver-sym
          :com.wsscode.pathom.connect/output  outputs
