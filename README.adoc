@@ -4,7 +4,9 @@ image:https://img.shields.io/clojars/v/com.fulcrologic/fulcro-rad-datomic.svg[li
 
 This is a plugin for Fulcro RAD that adds support for using Datomic databases as the back-end technology.
 
-NOTE: The current version supports on-prem Datomic Pro (PostgreSQL, MySQL, or Microsoft SQL Server backends), Datomic Free, or Mem stores, as well as Datomic Cloud. Make sure
+NOTE: The current version supports on-prem Datomic Pro (PostgreSQL, MySQL, or Microsoft SQL Server backends), Datomic Cloud, and Datomic-Local, as well as the nowadays deprecated Datomic Free. 
+
+Make sure
 you do not accidentally get Datomic Free and Datomic Pro BOTH on the CLASSPATH. If you're using deps you should make
 sure you use something like:
 
@@ -115,7 +117,7 @@ TODO: Write the validator, and document it.
 == Databases
 
 It is up to you to configure, create, migrate, and manage your database infrastructure; however,
-this plugin comes with various ustilities that can help you set up and manage the runtime
+this plugin comes with various utilities that can help you set up and manage the runtime
 environment. You *must* follow certain conventions for things to work at all, and *may choose* to
 opt into various features that make it easy to get started and evolve your system.
 
@@ -149,7 +151,7 @@ in the context of the current request.
 `::datomic/databases` - A map, keyed by schema, of the most recent database value that
 should be used in the context of the current request (for consistent reads across multiple resolvers).
 
-TODO: Supply helper funtions that can help with this
+TODO: Supply helper functions that can help with this
 
 == Indexed Access (Version 1.3.1+)
 
@@ -204,7 +206,7 @@ A typical test might look like the following:
 NOTE: The connection is memoized based on the schema key (not any supplied migration data). You
 can use `(datomic/reset-test-schema k)` to forget the current memoized version.
 
-For Datomic Cloud, the current recommendation is to use the https://github.com/ComputeSoftware/dev-local-tu[dev-local-tu] library.
+For Datomic Cloud, the current recommendation is to use the `com.datomic/local` with the `:mem` storage.
 See the https://github.com/fulcrologic/fulcro-rad-demo[fulcrologic/fulcro-rad-demo] for an example.
 
 == Resolver Generation

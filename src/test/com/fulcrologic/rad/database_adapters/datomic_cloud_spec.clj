@@ -13,7 +13,6 @@
     [com.fulcrologic.rad.test-schema.person :as person]
     [com.fulcrologic.rad.test-schema.thing :as thing]
     [datomic.client.api :as d]
-    [dev-local-tu.core :as dev-local-tu]
     [fulcro-spec.core :refer [specification assertions component behavior when-mocking]]
     [taoensso.timbre :as log]))
 
@@ -35,16 +34,22 @@
 (def ^:dynamic *env* {})
 
 (defn with-env [tests]
-  (with-open [db-env (dev-local-tu/test-env)]
-    (let [config {:datomic/env         :test
-                  :datomic/schema      :production
-                  :datomic/database    (str (gensym "test-database"))
-                  :datomic/test-client (:client db-env)}
-          conn   (datomic/start-database! all-attributes config {})]
-      (binding [*conn* conn
-                *env*  {::attr/key->attribute key->attribute
-                        do/connections        {:production conn}}]
-        (tests)))))
+  (let [dbname (str (gensym "test-database"))
+        client (d/client {:server-type :datomic-local
+                          :system (str (ids/new-uuid))
+                          :storage-dir :mem})]
+    (try
+      (let [config {:datomic/env         :test
+                    :datomic/schema      :production
+                    :datomic/database    dbname
+                    :datomic/test-client client}
+            conn   (datomic/start-database! all-attributes config {})]
+        (binding [*conn* conn
+                  *env*  {::attr/key->attribute key->attribute
+                          do/connections        {:production conn}}]
+          (tests)))
+      (finally
+        (d/delete-database client {:db-name dbname})))))
 
 (use-fixtures :each with-env)
 
