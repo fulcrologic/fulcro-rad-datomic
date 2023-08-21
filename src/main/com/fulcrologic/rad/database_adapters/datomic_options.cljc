@@ -32,18 +32,20 @@
   :com.fulcrologic.rad.database-adapters.datomic/wrap-resolve)
 
 (def raw-txn
-  "Pathom enviroment key. A sequence of Datomic transaction data in the list and/or map form, which will be added to the
+  "Middleware enviroment key. A sequence of Datomic transaction data in the list and/or map form, which will be added to the
    transaction data produced by the currently active (save or delete) middleware.
    
    You can use this to ensure pre- and post-condition, enrich the transactions, etc.
+   See also `datomic-common/append-to-raw-txn`.
    
    Ex.:
    ```clj
    (let [user ..., order ..., ident ...]
-    (cond-> pathom-env
+    (cond-> middleware-env
       (first-order-campaign? order)
-      (assoc do/raw-txn [(list 'my.txn.fns/ensure-no-prior-order user) ; check pre-condition
-                         {:db/id \"datomic.tx\" :tx/user (:email user)} ; enrich transaction info
-                         {:db/id (datomic-common/failsafe-id env ident) :db/ensure :order/valid-new-order}]))) ; check post-condition
+      (datomic-common/append-to-raw-txn
+        [(list 'my.txn.fns/ensure-no-prior-order user) ; check pre-condition
+         {:db/id \"datomic.tx\" :tx/user (:email user)} ; enrich transaction info
+         {:db/id (datomic-common/failsafe-id env ident) :db/ensure :order/valid-new-order}]))) ; check post-condition
    ```"
   :com.fulcrologic.rad.database-adapters.datomic/raw-txn)

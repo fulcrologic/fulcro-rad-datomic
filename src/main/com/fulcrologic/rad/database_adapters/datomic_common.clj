@@ -656,3 +656,9 @@
                     :components [qualified-key rad-id-value]})
         first
         :e))))
+
+(defn append-to-raw-txn
+  "Append raw transaction forms `txn` to `do/raw-txn` in the middleware environment.
+   To be used by middlewares wrapping the default delete/save middleware."
+  [mw-env txn]
+  (update mw-env do/raw-txn (fnil into []) txn))
