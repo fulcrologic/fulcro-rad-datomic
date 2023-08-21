@@ -252,7 +252,8 @@
 (>defn delta->txn
   [{::attr/keys [key->attribute] :as env} target-schema delta]
   [map? keyword? map? => map?]
-  (let [tempid->txid                 (tempid->intermediate-id env delta)
+  (let [raw-txn                      (do/raw-txn env)
+        tempid->txid                 (tempid->intermediate-id env delta)
         tempid->generated-id         (tempids->generated-ids env delta)
         non-native-id-attributes-txn (keep
                                        (fn [[k id :as ident]]
@@ -268,7 +269,8 @@
                              (concat
                                non-native-id-attributes-txn
                                (to-one-txn env target-schema delta)
-                               (to-many-txn env target-schema delta)))}))
+                               (to-many-txn env target-schema delta)
+                               raw-txn))}))
 
 (defn- attribute-schema [attributes]
   (mapv
@@ -654,3 +656,9 @@
                     :components [qualified-key rad-id-value]})
         first
         :e))))
+
+(defn append-to-raw-txn
+  "Append raw transaction forms `txn` to `do/raw-txn` in the middleware environment.
+   To be used by middlewares wrapping the default delete/save middleware."
+  [mw-env txn]
+  (update mw-env do/raw-txn (fnil into []) txn))

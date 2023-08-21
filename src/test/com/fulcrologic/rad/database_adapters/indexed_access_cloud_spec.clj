@@ -4,8 +4,9 @@
     [com.fulcrologic.rad.database-adapters.datomic-cloud :as datomic]
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.database-adapters.indexed-access-checks :as checks :refer [run-checks]]
+    [com.fulcrologic.rad.ids :as ids]
     [com.fulcrologic.rad.type-support.date-time :as dt]
-    [dev-local-tu.core :as dev-local-tu]
+    [datomic.client.api :as d]
     [fulcro-spec.core :refer [specification]]))
 
 (use-fixtures :once
@@ -24,12 +25,18 @@
   (run-checks (assoc
                 datomic/datomic-api
                 :generate-resolvers datomic/generate-resolvers
-                :make-connection (fn [& args]
-                                   (with-open [db-env (dev-local-tu/test-env)]
-                                     (let [config {:datomic/env         :test
-                                                   :datomic/schema      :main
-                                                   :datomic/database    (str (gensym "test-database"))
-                                                   :datomic/test-client (:client db-env)}
-                                           conn   (datomic/start-database! schema-attributes config {})]
-                                       conn))))))
+                :make-connection (fn [& _args]
+                                   (let [dbname (str (gensym "test-database"))
+                                         client (d/client {:server-type :datomic-local
+                                                           :system (str (ids/new-uuid))
+                                                           :storage-dir :mem})]
+                                    (try
+                                      (let [config {:datomic/env         :test
+                                                    :datomic/schema      :main
+                                                    :datomic/database    dbname
+                                                    :datomic/test-client client}
+                                            conn   (datomic/start-database! schema-attributes config {})]
+                                        conn)
+                                      (finally
+                                        (d/delete-database client {:db-name dbname}))))))))
 

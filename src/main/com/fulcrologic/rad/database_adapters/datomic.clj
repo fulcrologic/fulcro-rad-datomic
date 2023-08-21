@@ -85,12 +85,13 @@
   "Delete the given entity, if possible."
   [{:datomic/keys [transact]
     ::attr/keys   [key->attribute] :as env} params]
-  (enc/if-let [pk         (ffirst params)
+  (enc/if-let [raw-txn    (or (do/raw-txn env) [])
+               pk         (ffirst params)
                id         (get params pk)
                ident      [pk id]
                {:keys [::attr/schema]} (key->attribute pk)
                connection (-> env do/connections (get schema))
-               txn        [[:db/retractEntity ident]]]
+               txn        (into [[:db/retractEntity ident]] raw-txn)]
     (do
       (log/info "Deleting" ident)
       (let [database-atom (get-in env [do/databases schema])
