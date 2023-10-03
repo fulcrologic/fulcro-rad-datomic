@@ -205,18 +205,15 @@
         (reduce
           (fn [tx [k {:keys [before after]}]]
             (if (and (schema-value? env schema k) (not (to-one? env k)))
-              (do
-                (assert (or (nil? before) (sequential? before)) (str "Before must be sequential for " k))
-                (assert (or (nil? after) (sequential? after)) (str "After must be sequential for " k))
-                (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
-                      after   (into #{} (map (fn [v] (tx-value env k v))) after)
-                      adds    (map
-                                (fn [v] [:db/add (failsafe-id env ident) k v])
-                                (set/difference after before))
-                      removes (map
-                                (fn [v] [:db/retract (failsafe-id env ident) k v])
-                                (set/difference before after))]
-                  (into tx (concat adds removes))))
+              (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
+                    after   (into #{} (map (fn [v] (tx-value env k v))) after)
+                    adds    (map
+                              (fn [v] [:db/add (failsafe-id env ident) k v])
+                              (set/difference after before))
+                    removes (map
+                              (fn [v] [:db/retract (failsafe-id env ident) k v])
+                              (set/difference before after))]
+                (into tx (concat adds removes)))
               tx))
           []
           entity-delta))
