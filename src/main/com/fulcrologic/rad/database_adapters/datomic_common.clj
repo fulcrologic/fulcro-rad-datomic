@@ -205,15 +205,18 @@
         (reduce
           (fn [tx [k {:keys [before after]}]]
             (if (and (schema-value? env schema k) (not (to-one? env k)))
-              (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
-                    after   (into #{} (map (fn [v] (tx-value env k v))) after)
-                    adds    (map
-                              (fn [v] [:db/add (failsafe-id env ident) k v])
-                              (set/difference after before))
-                    removes (map
-                              (fn [v] [:db/retract (failsafe-id env ident) k v])
-                              (set/difference before after))]
-                (into tx (concat adds removes)))
+              (do
+                (assert (or (nil? before) (sequential? before) (set? before)) (str "Diff for to-many :before must be a collection of things for " k))
+                (assert (or (nil? after) (sequential? after) (set? after)) (str "Diff for to-many :after many must a collection of things for " k))
+                (let [before  (into #{} (map (fn [v] (tx-value env k v))) before)
+                      after   (into #{} (map (fn [v] (tx-value env k v))) after)
+                      adds    (map
+                                (fn [v] [:db/add (failsafe-id env ident) k v])
+                                (set/difference after before))
+                      removes (map
+                                (fn [v] [:db/retract (failsafe-id env ident) k v])
+                                (set/difference before after))]
+                  (into tx (concat adds removes))))
               tx))
           []
           entity-delta))
