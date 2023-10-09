@@ -11,6 +11,7 @@
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.ids :refer [new-uuid select-keys-in-ns]]
     [com.fulcrologic.rad.type-support.decimal :as math]
+    [com.wsscode.pathom.core :as p]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log]
     [taoensso.encore :as enc]))
@@ -50,6 +51,31 @@
            {join-key (vec items)})
          ele))
      query)))
+
+(def ^:dynamic *use-cache?* true)
+(def ^:dynamic *minimal-pull?* false)
+
+(defn prune-query
+  "Prunes the (id corrected) full-datomic-query so that it will only pull the things asked for by the given
+   `client-query`.
+
+   Returns the pruned datomic query, unless the client query is nil or empty, in which case it returns
+   the original full-datomic-query.
+   "
+  [client-query full-datomic-query]
+  (if (and (vector? client-query) (seq client-query))
+    (let [client-nodes  (:children (eql/query->ast client-query))
+          datomic-ast   (eql/query->ast full-datomic-query)
+          datomic-nodes (:children datomic-ast)
+          dkey->node    (zipmap (map :dispatch-key datomic-nodes) datomic-nodes)
+          new-children  (into []
+                          (comp
+                            (map :dispatch-key)
+                            (keep (fn [k] (when-let [dnode (dkey->node k)] dnode))))
+                          client-nodes)]
+      (eql/ast->query (assoc datomic-ast :children new-children)))
+    full-datomic-query))
+
 
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
@@ -474,39 +500,49 @@
 
 (defn make-pathom2-resolver
   "Creates a pathom2 resolver, skipping the macro"
-  [resolve-sym qualified-key outputs resolve-fn transform-fn]
-  (let [with-resolve-sym (fn [r]
-                           (fn [env input]
-                             (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
-    (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
-             :com.wsscode.pathom.connect/output  outputs
-             :com.wsscode.pathom.connect/batch?  true
-             :com.wsscode.pathom.connect/resolve (with-resolve-sym resolve-fn)
-             :com.wsscode.pathom.connect/input   #{qualified-key}}
-      transform-fn transform-fn)))
+  ([resolve-sym qualified-key outputs resolve-fn transform-fn]
+   (make-pathom2-resolver resolve-sym qualified-key outputs resolve-fn transform-fn {}))
+  ([resolve-sym qualified-key outputs resolve-fn transform-fn {:keys [use-cache?]}]
+   (let [with-resolve-sym (fn [r]
+                            (fn [env input]
+                              (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
+     (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
+              :com.wsscode.pathom.connect/output  outputs
+              :com.wsscode.pathom.connect/batch?  true
+              :com.wsscode.pathom.connect/cache?  (boolean (if (some? use-cache?) use-cache? *use-cache?*))
+              :com.wsscode.pathom.connect/resolve (with-resolve-sym resolve-fn)
+              :com.wsscode.pathom.connect/input   #{qualified-key}}
+       transform-fn transform-fn))))
 
 (defn make-pathom3-resolver
   "Creates a pathom3 resolver, skipping the macro"
-  [resolve-sym qualified-key outputs resolve-fn transform-fn]
-  ; We introduce and use lazy-invoke, because Pathom3 bottoms out on a defrecord
-  ; called com.wsscode.pathom3.connect.operation/Resolver
-  ; This requires invoking the resolver function.
-  ; Doing a lazy-invoke will prevent pathom3 from being a hard-dependency for other users of this
-  (lazy-invoke com.wsscode.pathom3.connect.operation/resolver
-    (merge
-      {:com.wsscode.pathom3.connect.operation/op-name resolve-sym
-       :com.wsscode.pathom3.connect.operation/batch?  true
-       :com.wsscode.pathom3.connect.operation/input   [qualified-key]
-       :com.wsscode.pathom3.connect.operation/output  outputs
-       :com.wsscode.pathom3.connect.operation/resolve resolve-fn}
-      (when transform-fn
-        {:com.wsscode.pathom3.connect.operation/transform transform-fn}))))
+  ([resolve-sym qualified-key outputs resolve-fn transform-fn]
+   (make-pathom3-resolver resolve-sym qualified-key outputs resolve-fn transform-fn {}))
+  ([resolve-sym qualified-key outputs resolve-fn transform-fn {:keys [use-cache?]}]
+   ; We introduce and use lazy-invoke, because Pathom3 bottoms out on a defrecord
+   ; called com.wsscode.pathom3.connect.operation/Resolver
+   ; This requires invoking the resolver function.
+   ; Doing a lazy-invoke will prevent pathom3 from being a hard-dependency for other users of this
+   (lazy-invoke com.wsscode.pathom3.connect.operation/resolver
+     (merge
+       {:com.wsscode.pathom3.connect.operation/op-name resolve-sym
+        :com.wsscode.pathom3.connect.operation/batch?  true
+        :com.wsscode.pathom3.connect.operation/cache?  (boolean (if (some? use-cache?) use-cache? *use-cache?*))
+        :com.wsscode.pathom3.connect.operation/input   [qualified-key]
+        :com.wsscode.pathom3.connect.operation/output  outputs
+        :com.wsscode.pathom3.connect.operation/resolve resolve-fn}
+       (when transform-fn
+         {:com.wsscode.pathom3.connect.operation/transform transform-fn})))))
 
 (defn id-resolver-pathom*
   "Common implementation of id-resolver.
 
   Takes in resolver-maker-fn, which knows how to make a Pathom resolver for either Pathom2 or Pathom3.
-  Its signature must be [resolve-sym qualified-key outputs resolver-fn transform]
+  Its signature must be [resolve-sym qualified-key outputs resolver-fn transform] with an optional final
+  map argument that can accept options.
+
+  If the ID attribute has no `generate-minimal-pull?` or `resolver-cache?` option, then the dynamic variables
+  `*minimal-pull?*` and `*use-cache?*` will be used as defaults (false, true are the legacy defaults).
 
   Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
   [resolver-maker-fn
@@ -514,29 +550,41 @@
    all-attributes
    {::attr/keys [qualified-key] :keys [::attr/schema ::wrap-resolve :com.wsscode.pathom.connect/transform] :as id-attribute}
    output-attributes]
-  (log/info "Building ID resolver for" qualified-key)
+  (log/debug "Building ID resolver for" qualified-key)
   (enc/if-let [_          id-attribute
                outputs    (attr/attributes->eql output-attributes)
                pull-query (pathom-query->datomic-query all-attributes outputs)]
-    (let [wrap-resolve (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
-          resolve-sym  (symbol
-                         (str (namespace qualified-key))
-                         (str (name qualified-key) "-resolver-datomic"))
-          resolver-fn  (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                                 (->> (entity-query*
-                                        pull-fn pull-many-fn datoms-for-id-fn
-                                        (assoc env
-                                          ::attr/schema schema
-                                          ::attr/attributes output-attributes
-                                          ::id-attribute id-attribute
-                                          ::default-query pull-query)
-                                        input)
-                                   (datomic-result->pathom-result key->attribute outputs)
-                                   (auth/redact env)))
-                         wrap-resolve (wrap-resolve))]
+    (let [wrap-resolve   (get id-attribute do/wrap-resolve (get id-attribute ::wrap-resolve))
+          resolve-sym    (symbol
+                           (str (namespace qualified-key))
+                           (str (name qualified-key) "-resolver-datomic"))
+          minimal-query? (boolean
+                           (or
+                             (true? (do/generate-minimal-pull? id-attribute))
+                             *minimal-pull?*))
+          use-cache?     (boolean
+                           (if (boolean? (do/resolver-cache? id-attribute))
+                             (do/resolver-cache? id-attribute)
+                             *use-cache?*))
+          resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute]
+                                       client-query ::p/parent-query :as env} input]
+                                   (let [query (if (and minimal-query? client-query) (prune-query client-query pull-query) pull-query)]
+                                     (->> (entity-query*
+                                            pull-fn pull-many-fn datoms-for-id-fn
+                                            (assoc env
+                                              ::attr/schema schema
+                                              ::attr/attributes output-attributes
+                                              ::id-attribute id-attribute
+                                              ::default-query query)
+                                            input)
+                                       (datomic-result->pathom-result key->attribute outputs)
+                                       (auth/redact env))))
+                           wrap-resolve (wrap-resolve))]
       (log/debug "Computed output is" outputs)
       (log/debug "Datomic pull query to derive output is" pull-query)
-      (resolver-maker-fn resolve-sym qualified-key outputs resolver-fn transform))
+      (binding [*use-cache?*    use-cache?
+                *minimal-pull?* minimal-query?]
+        (resolver-maker-fn resolve-sym qualified-key outputs resolver-fn transform)))
     (do
       (log/error "Unable to generate id-resolver. "
         "Attribute was missing schema, or could not be found in the attribute registry: " qualified-key)
@@ -546,6 +594,8 @@
   "Common implementation of generate-resolvers.
 
   Takes in resolver-maker-fn, which knows how to make a Pathom resolver for either Pathom2 or Pathom3.
+
+  Bind the dynamic vars *use-cache?* and *minimal-pull?* if you want to override the defaults.
 
   Takes in pull-fn, pull-many-fn, and datoms-for-id-fn, that is different between on-prem and cloud."
   [resolver-maker-fn

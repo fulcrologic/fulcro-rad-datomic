@@ -243,21 +243,48 @@
 
 (defn generate-resolvers
   "Generate all of the resolvers that make sense for the given database config. This should be passed
-  to your Pathom2 parser to register resolvers for each of your schemas."
-  [attributes schema]
-  (common/generate-resolvers*
-    common/make-pathom2-resolver
-    d/pull pull-many datoms-for-id-client-api
-    attributes schema))
+  to your Pathom2 parser to register resolvers for each of your schemas.
+
+  The options can include (which can also be set on individual ID attributes):
+
+  * use-cache? - Default to using Pathom request cache for all entities (default true)
+  * minimal-pulls? - Default to asking for everything an entity has from Datomic instead of just what the client wants.
+    (default false). Setting to true can cause unexpected behavior unless you turn OFF the cache.
+  "
+  ([attributes schema]
+   (generate-resolvers attributes schema {}))
+  ([attributes schema {:keys [use-cache? minimal-pulls?]}]
+   (binding [common/*minimal-pull?* (if (boolean? minimal-pulls?) minimal-pulls? false)
+             common/*use-cache?*    (cond
+                                      (boolean use-cache?) use-cache?
+                                      (true? minimal-pulls?) false
+                                      :else true)]
+     (common/generate-resolvers*
+       common/make-pathom2-resolver
+       d/pull pull-many datoms-for-id-client-api
+       attributes schema))))
 
 (defn generate-resolvers-pathom3
   "Generate all of the resolvers that make sense for the given database config. This should be passed
-  to your Pathom3 parser to register resolvers for each of your schemas."
-  [attributes schema]
-  (common/generate-resolvers*
-    common/make-pathom3-resolver
-    d/pull pull-many datoms-for-id-client-api
-    attributes schema))
+  to your Pathom3 parser to register resolvers for each of your schemas.
+  The options can include (which can also be set on individual ID attributes):
+
+  * use-cache? - Default to using Pathom request cache for all entities (default true)
+  * minimal-pulls? - Default to asking for everything an entity has from Datomic instead of just what the client wants.
+  (default false) . Setting to true can cause unexpected behavior unless you turn OFF the cache.
+  "
+  ([attributes schema]
+   (generate-resolvers-pathom3 attributes schema {}))
+  ([attributes schema {:keys [use-cache? minimal-pulls?]}]
+   (binding [common/*minimal-pull?* (if (boolean? minimal-pulls?) minimal-pulls? false)
+             common/*use-cache?*    (cond
+                                      (boolean use-cache?) use-cache?
+                                      (true? minimal-pulls?) false
+                                      :else true)]
+     (common/generate-resolvers*
+       common/make-pathom3-resolver
+       d/pull pull-many datoms-for-id-client-api
+       attributes schema))))
 
 (defn mock-resolver-env
   "Returns a mock env that has the do/connections and do/databases keys that would be present in

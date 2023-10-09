@@ -52,3 +52,27 @@
          {:db/id (datomic-common/failsafe-id env ident) :db/ensure :order/valid-new-order}]))) ; check post-condition
    ```"
   :com.fulcrologic.rad.database-adapters.datomic/raw-txn)
+
+(def generate-minimal-pull?
+  "ID Attribute option for resolver generation.  Default false.
+
+   Indicates that the Datomic pull that should run in a resolver should be minimal.
+
+   By default the resolvers cache their results in a request, so a minimal query can cause requests
+   for different elements of the same entity to fail (because only the first cached version will be
+   used).
+
+   So, if you specify this it will automatically force `resolver-cache? false` for the generated resolver
+   (unless overridden)."
+  :com.fulcrologic.rad.database-adapters.datomic/generate-minimal-pull?)
+
+(def resolver-cache?
+  "ID Attribute option for resolver generation.
+
+   Indicates that the per-request response cache NOT cache instances
+   of this particular entity. This is necessary if you might have recursive queries for the same entity, and you
+   have asked the resolvers to generate a minimal pull.
+
+   Defaults to `true` in Pathom, but will be forced to false if minimal pulls are used (which you can override
+   with this option)."
+  :com.fulcrologic.rad.database-adapters.datomic/resolver-cache?)

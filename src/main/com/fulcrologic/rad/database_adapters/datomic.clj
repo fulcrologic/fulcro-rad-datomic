@@ -162,19 +162,19 @@
 
 (defn config->sqlserver-url [{:sqlserver/keys [host port user password
                                                database properties]
-                             datomic-db       :datomic/database
-                             :or              {datomic-db "demo"}}]
+                              datomic-db      :datomic/database
+                              :or             {datomic-db "demo"}}]
   (let [all-properties (cond-> {}
                          user (assoc "Username" user)
                          password (assoc "Password" password)
                          database (assoc "DatabaseName" database)
                          properties (merge properties))
         properties-str (reduce-kv (fn [p k v] (str p ";" k "=" v))
-                                  ""
-                                  all-properties)]
+                         ""
+                         all-properties)]
     (str "datomic:sql://" datomic-db "?jdbc:sqlserver://"
-         (str host (when port (str ":" port)))
-         properties-str)))
+      (str host (when port (str ":" port)))
+      properties-str)))
 
 (defn config->free-url [{:free/keys [host port]
                          datomic-db :datomic/database}]
@@ -367,20 +367,32 @@
 (defn generate-resolvers
   "Generate all of the resolvers that make sense for the given database config. This should be passed
    to your Pathom2 parser to register resolvers for each of your schemas."
-  [attributes schema]
-  (common/generate-resolvers*
-    common/make-pathom2-resolver
-    d/pull d/pull-many datoms-for-id-peer-api
-    attributes schema))
+  ([attributes schema] (generate-resolvers attributes schema {}))
+  ([attributes schema {:keys [use-cache? minimal-pulls?]}]
+   (binding [common/*minimal-pull?* (if (boolean? minimal-pulls?) minimal-pulls? false)
+             common/*use-cache?*    (cond
+                                      (boolean use-cache?) use-cache?
+                                      (true? minimal-pulls?) false
+                                      :else true)]
+     (common/generate-resolvers*
+       common/make-pathom2-resolver
+       d/pull d/pull-many datoms-for-id-peer-api
+       attributes schema))))
 
 (defn generate-resolvers-pathom3
   "Generate all of the resolvers that make sense for the given database config. This should be passed
    to your Pathom3 parser to register resolvers for each of your schemas."
-  [attributes schema]
-  (common/generate-resolvers*
-    common/make-pathom3-resolver
-    d/pull d/pull-many datoms-for-id-peer-api
-    attributes schema))
+  ([attributes schema] (generate-resolvers-pathom3 attributes schema {}))
+  ([attributes schema {:keys [use-cache? :minimal-pulls?]}]
+   (binding [common/*minimal-pull?* (if (boolean? minimal-pulls?) minimal-pulls? false)
+             common/*use-cache?*    (cond
+                                      (boolean use-cache?) use-cache?
+                                      (true? minimal-pulls?) false
+                                      :else true)]
+     (common/generate-resolvers*
+       common/make-pathom3-resolver
+       d/pull d/pull-many datoms-for-id-peer-api
+       attributes schema))))
 
 (def ^:private pristine-db (atom nil))
 (def ^:private migrated-dbs (atom {}))
