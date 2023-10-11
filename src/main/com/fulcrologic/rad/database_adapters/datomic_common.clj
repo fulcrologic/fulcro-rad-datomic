@@ -65,6 +65,8 @@
   [client-query full-datomic-query]
   (if (and (vector? client-query) (seq client-query))
     (let [client-nodes  (:children (eql/query->ast client-query))
+          ;; dedupe. Not using a set just in case there are two conflicting joins
+          client-nodes  (vals (zipmap (map :dispatch-key client-nodes) client-nodes))
           datomic-ast   (eql/query->ast full-datomic-query)
           datomic-nodes (:children datomic-ast)
           dkey->node    (zipmap (map :dispatch-key datomic-nodes) datomic-nodes)
