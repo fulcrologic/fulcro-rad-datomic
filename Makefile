@@ -1,5 +1,4 @@
 tests:
-	@echo "This will fail if you have not installed on-prem creds in your :mvn/repos and maven settings.xml manually. See Datomic Documentation."
 	clojure -A:test -J-Dguardrails.config=guardrails-test.edn -J-Dguardrails.enabled
 
 dev:
