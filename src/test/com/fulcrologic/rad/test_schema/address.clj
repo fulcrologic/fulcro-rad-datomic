@@ -16,4 +16,9 @@
    ao/required?  true
    ao/schema     :production})
 
-(def attributes [id enabled? street])
+;; Make it possible to request the native :db/id from the db in addition to :address/id
+(defattr db-id :db/id :long
+  {ao/identities #{::id}
+   ao/schema     :production})
+
+(def attributes [id enabled? street db-id])
