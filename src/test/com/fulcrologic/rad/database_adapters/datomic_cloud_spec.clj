@@ -13,7 +13,7 @@
     [com.fulcrologic.rad.test-schema.person :as person]
     [com.fulcrologic.rad.test-schema.thing :as thing]
     [datomic.client.api :as d]
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking]]
+    [fulcro-spec.core :refer [specification assertions component behavior when-mocking =fn=>]]
     [taoensso.timbre :as log]))
 
 (declare =>)
@@ -440,7 +440,12 @@
           (uuid? real-id) => true
           "Returns the newly-created attributes"
           entity => {::address/id     real-id
-                     ::address/street "A St"})))
+                     ::address/street "A St"})
+        (component "id resolver"
+          (assertions
+            "Can return :db/id when requested"
+            (-> (parser {} [{[::address/id real-id] [:db/id]}])
+                first val :db/id) =fn=> int?))))
     (component "Saving a tree"
       (let [temp-person-id  (tempid/tempid)
             temp-address-id (tempid/tempid)

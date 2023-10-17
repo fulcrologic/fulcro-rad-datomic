@@ -98,6 +98,7 @@
   [k->a ast-nodes result]
   (let [id?                (fn [{:keys [dispatch-key]}] (some-> dispatch-key k->a ::attr/identity?))
         id-key             (:key (first (filter id? ast-nodes)))
+        native-id?         (some-> id-key k->a do/native-id?)
         join-key->children (into {}
                              (comp
                                (filter #(= :join (:type %)))
@@ -108,7 +109,7 @@
     (reduce-kv
       (fn [m k v]
         (cond
-          (= :db/id k) (assoc m id-key v)
+          (and native-id? (= :db/id k)) (assoc m id-key v)
           (and (join-key? k) (vector? v)) (assoc m k (mapv #(fix-id-keys k->a (join-key->children k) %) v))
           (and (join-key? k) (map? v)) (assoc m k (fix-id-keys k->a (join-key->children k) v))
           :otherwise (assoc m k v)))

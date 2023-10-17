@@ -26,7 +26,6 @@
 
 (use-fixtures :each with-env)
 
-; TODO -- move to common-spec
 (specification "native ID pull query transform" :focus
   (component "pathom-query->datomic-query"
     (let [incoming-query         [::person/id
