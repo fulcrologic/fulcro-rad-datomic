@@ -11,7 +11,6 @@
     [com.fulcrologic.rad.database-adapters.datomic-options :as do]
     [com.fulcrologic.rad.ids :refer [new-uuid select-keys-in-ns]]
     [com.fulcrologic.rad.type-support.decimal :as math]
-    [com.wsscode.pathom.core :as p]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log]
     [taoensso.encore :as enc]))
@@ -570,7 +569,7 @@
                              (do/resolver-cache? id-attribute)
                              *use-cache?*))
           resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute]
-                                       client-query ::p/parent-query :as env} input]
+                                       client-query :com.wsscode.pathom.core/parent-query :as env} input]
                                    (let [query (if (and minimal-query? client-query) (prune-query client-query pull-query) pull-query)]
                                      (->> (entity-query*
                                             pull-fn pull-many-fn datoms-for-id-fn
