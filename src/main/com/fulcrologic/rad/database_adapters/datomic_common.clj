@@ -54,6 +54,16 @@
 (def ^:dynamic *use-cache?* true)
 (def ^:dynamic *minimal-pull?* false)
 
+(defn env->client-query-ast [env]
+  (if-let [p2-client-query (:com.wsscode.pathom.core/parent-query env)]
+    ;; Pathom 2
+    (when (and (vector? p2-client-query) (seq p2-client-query))
+      (eql/query->ast p2-client-query))
+    ;; Pathom 3 (ideally, we'd use P3 dynamic resolvers instead...)
+    (-> env
+        :com.wsscode.pathom3.connect.planner/graph
+        :com.wsscode.pathom3.connect.planner/source-ast)))
+
 (defn prune-query
   "Prunes the (id corrected) full-datomic-query so that it will only pull the things asked for by the given
    `client-query`.
@@ -61,9 +71,9 @@
    Returns the pruned datomic query, unless the client query is nil or empty, in which case it returns
    the original full-datomic-query.
    "
-  [client-query full-datomic-query]
-  (if (and (vector? client-query) (seq client-query))
-    (let [client-nodes  (:children (eql/query->ast client-query))
+  [client-query-ast full-datomic-query]
+  (if (seq client-query-ast)
+    (let [client-nodes  (:children client-query-ast)
           ;; dedupe. Not using a set just in case there are two conflicting joins
           client-nodes  (vals (zipmap (map :dispatch-key client-nodes) client-nodes))
           datomic-ast   (eql/query->ast full-datomic-query)
@@ -568,9 +578,9 @@
                            (if (boolean? (do/resolver-cache? id-attribute))
                              (do/resolver-cache? id-attribute)
                              *use-cache?*))
-          resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute]
-                                       client-query :com.wsscode.pathom.core/parent-query :as env} input]
-                                   (let [query (if (and minimal-query? client-query) (prune-query client-query pull-query) pull-query)]
+          resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute] :as env} input]
+                                   (let [client-query-ast (env->client-query-ast env)
+                                         query (if (and minimal-query? client-query-ast) (prune-query client-query-ast pull-query) pull-query)]
                                      (->> (entity-query*
                                             pull-fn pull-many-fn datoms-for-id-fn
                                             (assoc env
