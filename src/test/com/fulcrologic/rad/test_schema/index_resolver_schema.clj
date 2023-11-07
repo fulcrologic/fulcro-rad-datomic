@@ -41,18 +41,34 @@
    ao/target           :customer/id
    ao/identities       #{:purchase/id}})
 
+(defattr purchase-payee :purchase/payee :ref
+  {ao/schema           :main
+   ao/required?        true
+   do/attribute-schema {:db/index true}
+   ao/targets          #{:customer/id :company/id}
+   ao/identities       #{:purchase/id}})
+
 (defattr purchase-customer+date :purchase/customer+date :tuple
   {ao/schema           :main
    do/attribute-schema {:db/tupleAttrs [:purchase/customer :purchase/date]
                         :db/index      true}
    ao/identities       #{:purchase/id}})
 
+(defattr company-id :company/id :uuid
+  {ao/schema    :main
+   ao/identity? true})
+
+(defattr company-name :company/name :string
+  {ao/schema     :main
+   ao/identities #{:company/id}})
+
 (defattr purchase-date+filters :purchase/date+filters :tuple
   {ao/schema           :main
-   do/attribute-schema {:db/tupleAttrs [:purchase/date :purchase/customer :purchase/shipped? :purchase/amount]
+   do/attribute-schema {:db/tupleAttrs [:purchase/date :purchase/customer :purchase/shipped? :purchase/amount :purchase/payee]
                         :db/index      true}
    ao/identities       #{:purchase/id}})
 
 (def attributes [customer-id customer-name purchase-id purchase-date purchase-amount
                  purchase-customer purchase-shipped? purchase-customer+date
-                 purchase-date+filters])
+                 purchase-date+filters
+                 purchase-payee company-id company-name])

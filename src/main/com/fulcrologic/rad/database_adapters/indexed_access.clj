@@ -144,7 +144,7 @@
   [{:datomic-api/keys [datoms]
     ::attr/keys       [key->attribute] :as pathom-env} parameter-keyword attribute-key v]
   (let [end?           (= "end" (name parameter-keyword))
-        {::attr/keys [schema type target]} (get key->attribute attribute-key)
+        {::attr/keys [schema type target targets]} (get key->attribute attribute-key)
         ref-uuid->dbid (fn ref->dbid* [db target-key uuid]
                          (when (and db target-key uuid)
                            (some-> (datoms db {:index :avet :components [target-key uuid]}) first :e)))
@@ -160,7 +160,7 @@
       (and (nil? db) ref? (or uuid? ident?)) (do
                                                (log/warn "Cannot coerce ref. db isn't in pathom env. Did you install the Datomic RAD plugin properly?")
                                                v)
-      (and db ref? uuid? (not target)) (log/error "Cannot coerce reference because ao/target is not defined and ao/targets is not supported")
+      (and db ref? uuid? (seq targets)) (first (keep (fn [target] (ref-uuid->dbid db target v)) targets))
       (and db ref? uuid?) (ref-uuid->dbid db target v)
       (and db ref? ident?) (ref-uuid->dbid db (first v) (second v))
       :else (cond-> v

@@ -22,44 +22,52 @@
   (let [c   (make-connection all-attributes :main)
         idA (ids/new-uuid 1)
         idB (ids/new-uuid 2)
-        {{:strs [A B P1 P2 P3 P4 P5 P6]} :tempids} (transact c
-                                                     {:tx-data
-                                                      (into
-                                                        [{:db/id "A" :customer/id idA :customer/name "A"}
-                                                         {:db/id "B" :customer/id idB :customer/name "B"}
-                                                         {:db/id             "P1"
-                                                          :purchase/id       (ids/new-uuid 100)
-                                                          :purchase/date     #inst "2021-01-06T12"
-                                                          :purchase/customer "A"
-                                                          :purchase/amount   -100.0M}
-                                                         {:db/id             "P2"
-                                                          :purchase/id       (ids/new-uuid 101)
-                                                          :purchase/date     #inst "2021-01-05T12"
-                                                          :purchase/customer "A"
-                                                          :purchase/amount   40.0M}
-                                                         {:db/id             "P3"
-                                                          :purchase/id       (ids/new-uuid 102)
-                                                          :purchase/date     #inst "2021-01-04T12"
-                                                          :purchase/customer "A"
-                                                          :purchase/shipped? true
-                                                          :purchase/amount   20.0M}
-                                                         {:db/id             "P4"
-                                                          :purchase/id       (ids/new-uuid 103)
-                                                          :purchase/date     #inst "2021-01-03T12"
-                                                          :purchase/customer "A"
-                                                          :purchase/amount   15.0M}
-                                                         {:db/id             "P5"
-                                                          :purchase/id       (ids/new-uuid 104)
-                                                          :purchase/date     #inst "2021-01-02T12"
-                                                          :purchase/customer "A"
-                                                          :purchase/shipped? true
-                                                          :purchase/amount   10.0M}
-                                                         {:db/id             "P6"
-                                                          :purchase/id       (ids/new-uuid 105)
-                                                          :purchase/date     #inst "2021-01-01T12"
-                                                          :purchase/shipped? false
-                                                          :purchase/customer "B"
-                                                          :purchase/amount   20.0M}])})
+        idC (ids/new-uuid 3)
+        {{:strs [A B COMPANY P1 P2 P3 P4 P5 P6]} :tempids} (transact c
+                                                             {:tx-data
+                                                              (into
+                                                                [{:db/id "A" :customer/id idA :customer/name "A"}
+                                                                 {:db/id "B" :customer/id idB :customer/name "B"}
+                                                                 {:db/id "COMPANY" :company/id idC :company/name "C"}
+                                                                 {:db/id             "P1"
+                                                                  :purchase/id       (ids/new-uuid 100)
+                                                                  :purchase/date     #inst "2021-01-06T12"
+                                                                  :purchase/customer "A"
+                                                                  :purchase/payee    "A"
+                                                                  :purchase/amount   -100.0M}
+                                                                 {:db/id             "P2"
+                                                                  :purchase/id       (ids/new-uuid 101)
+                                                                  :purchase/date     #inst "2021-01-05T12"
+                                                                  :purchase/customer "A"
+                                                                  :purchase/payee    "A"
+                                                                  :purchase/amount   40.0M}
+                                                                 {:db/id             "P3"
+                                                                  :purchase/id       (ids/new-uuid 102)
+                                                                  :purchase/date     #inst "2021-01-04T12"
+                                                                  :purchase/customer "A"
+                                                                  :purchase/payee    "A"
+                                                                  :purchase/shipped? true
+                                                                  :purchase/amount   20.0M}
+                                                                 {:db/id             "P4"
+                                                                  :purchase/id       (ids/new-uuid 103)
+                                                                  :purchase/date     #inst "2021-01-03T12"
+                                                                  :purchase/customer "A"
+                                                                  :purchase/payee    "A"
+                                                                  :purchase/amount   15.0M}
+                                                                 {:db/id             "P5"
+                                                                  :purchase/id       (ids/new-uuid 104)
+                                                                  :purchase/date     #inst "2021-01-02T12"
+                                                                  :purchase/customer "A"
+                                                                  :purchase/payee    "COMPANY"
+                                                                  :purchase/shipped? true
+                                                                  :purchase/amount   10.0M}
+                                                                 {:db/id             "P6"
+                                                                  :purchase/id       (ids/new-uuid 105)
+                                                                  :purchase/date     #inst "2021-01-01T12"
+                                                                  :purchase/shipped? false
+                                                                  :purchase/customer "B"
+                                                                  :purchase/payee    "B"
+                                                                  :purchase/amount   20.0M}])})
         db  (c->db c)
         env (merge api
               {::attr/key->attribute key->attribute
@@ -96,24 +104,29 @@
               results => [{:db/id             P1
                            :purchase/date     #inst "2021-01-06T12"
                            :purchase/customer A
+                           :purchase/payee    A
                            :purchase/amount   -100.0M}
                           {:db/id             P2
                            :purchase/date     #inst "2021-01-05T12"
                            :purchase/customer A
+                           :purchase/payee    A
                            :purchase/amount   40.0M}
                           {:db/id             P3
                            :purchase/date     #inst "2021-01-04T12"
                            :purchase/shipped? true
                            :purchase/customer A
+                           :purchase/payee    A
                            :purchase/amount   20.0M}
                           {:db/id             P4
                            :purchase/date     #inst "2021-01-03T12"
                            :purchase/customer A
+                           :purchase/payee    A
                            :purchase/amount   15.0M}
                           {:db/id             P5
                            :purchase/date     #inst "2021-01-02T12"
                            :purchase/shipped? true
                            :purchase/customer A
+                           :purchase/payee    COMPANY
                            :purchase/amount   10.0M}])))
         (component "As selector"
           (let [{:keys [results]} (idx/tuple-index-scan db env schema/purchase-date+filters
@@ -194,6 +207,27 @@
           (assertions
             "Coerces to db ids"
             (:purchase/customer filters) => A)))
+      (let [{:keys [filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                (attr/attribute-map schema/attributes)
+                                {:purchase/payee      idC
+                                 :purchase.date/start (ld/of 2021 1 1)
+                                 :purchase.date/end   (ld/of 2021 1 6)})]
+        (component "Using UUIDs on things with ao/targets"
+          (assertions
+            "Coerces to db ids"
+            (:purchase/payee filters) => COMPANY)))
+      (let [{:keys [filters]} (idx/search-parameters->range+filters env schema/purchase-date+filters
+                                (attr/attribute-map schema/attributes)
+                                {:purchase.payee/subset #{idA idC}
+                                 :purchase.date/start   (ld/of 2021 1 1)
+                                 :purchase.date/end     (ld/of 2021 1 6)})
+            f (:purchase/payee filters)]
+        (component "Using UUIDs on things with ao/targets"
+          (assertions
+            "Coerces to db ids"
+            (f COMPANY) => true
+            (f A) => true
+            (f B) => false)))
       (let [dt #inst "2021-01-06"
             {{:keys [start end]} :range} (idx/search-parameters->range+filters env schema/purchase-date+filters
                                            (attr/attribute-map schema/attributes)
