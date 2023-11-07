@@ -428,10 +428,9 @@
            (log/debug "Returning cached test db")
            (dm/mock-conn db))
          (let [base-connection (pristine-db-connection)
-               conn            (dm/mock-conn (d/db base-connection))
-               txn             (if (vector? txn) txn (common/automatic-schema all-attributes schema-name))]
+               conn            (dm/mock-conn (d/db base-connection))]
            (log/debug "Transacting schema: " (with-out-str (pprint txn)))
-           @(d/transact conn txn)
+           (common/ensure-schema! d/transact conn schema-name all-attributes)
            (let [db (d/db conn)]
              (swap! migrated-dbs assoc h db)
              (dm/mock-conn db))))))))

@@ -69,6 +69,5 @@
    ao/identities       #{:purchase/id}})
 
 (def attributes [customer-id customer-name purchase-id purchase-date purchase-amount
-                 purchase-customer purchase-shipped? purchase-customer+date
-                 purchase-date+filters
-                 purchase-payee company-id company-name])
+                 purchase-payee company-id company-name purchase-customer purchase-shipped?
+                 purchase-customer+date purchase-date+filters])
