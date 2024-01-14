@@ -54,29 +54,52 @@
 (def ^:dynamic *use-cache?* true)
 (def ^:dynamic *minimal-pull?* false)
 
-(defn prune-query
+(defn env->client-query-ast [env]
+  (if-let [p2-client-query (:com.wsscode.pathom.core/parent-query env)]
+    ;; Pathom 2
+    (when (and (vector? p2-client-query) (seq p2-client-query))
+      (eql/query->ast p2-client-query))
+    ;; Pathom 3 (ideally, we'd use P3 dynamic resolvers instead...)
+    (-> env
+        :com.wsscode.pathom3.connect.planner/graph
+        :com.wsscode.pathom3.connect.planner/source-ast)))
+
+(defn prune-query-ast
   "Prunes the (id corrected) full-datomic-query so that it will only pull the things asked for by the given
    `client-query`.
 
    Returns the pruned datomic query, unless the client query is nil or empty, in which case it returns
    the original full-datomic-query.
    "
-  [client-query full-datomic-query]
-  (if (and (vector? client-query) (seq client-query))
-    (let [client-nodes  (:children (eql/query->ast client-query))
+  [client-query-ast full-datomic-query]
+  (if (seq client-query-ast)
+    (let [client-nodes  (:children client-query-ast)
           ;; dedupe. Not using a set just in case there are two conflicting joins
           client-nodes  (vals (zipmap (map :dispatch-key client-nodes) client-nodes))
           datomic-ast   (eql/query->ast full-datomic-query)
           datomic-nodes (:children datomic-ast)
           dkey->node    (zipmap (map :dispatch-key datomic-nodes) datomic-nodes)
           new-children  (into []
-                          (comp
-                            (map :dispatch-key)
-                            (keep (fn [k] (when-let [dnode (dkey->node k)] dnode))))
-                          client-nodes)]
+                              (comp
+                                (map :dispatch-key)
+                                (keep (fn [k] (when-let [dnode (dkey->node k)] dnode))))
+                              client-nodes)]
       (eql/ast->query (assoc datomic-ast :children new-children)))
     full-datomic-query))
 
+(defn prune-query
+  "Prunes the (id corrected) full-datomic-query so that it will only pull the things asked for by the given
+   `client-query`.
+
+   Returns the pruned datomic query, unless the client query is nil or empty, in which case it returns
+   the original full-datomic-query.
+
+   Left here for backwards compatibility.
+   "
+  [client-query full-datomic-query]
+  (if (and (vector? client-query) (seq client-query))
+    (prune-query-ast (eql/query->ast client-query) full-datomic-query)
+    full-datomic-query))
 
 (>defn pathom-query->datomic-query [all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
@@ -568,9 +591,9 @@
                            (if (boolean? (do/resolver-cache? id-attribute))
                              (do/resolver-cache? id-attribute)
                              *use-cache?*))
-          resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute]
-                                       client-query :com.wsscode.pathom.core/parent-query :as env} input]
-                                   (let [query (if (and minimal-query? client-query) (prune-query client-query pull-query) pull-query)]
+          resolver-fn    (cond-> (fn [{::attr/keys  [key->attribute] :as env} input]
+                                   (let [client-query-ast (env->client-query-ast env)
+                                         query (if (and minimal-query? client-query-ast) (prune-query-ast client-query-ast pull-query) pull-query)]
                                      (->> (entity-query*
                                             pull-fn pull-many-fn datoms-for-id-fn
                                             (assoc env
