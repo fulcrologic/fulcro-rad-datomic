@@ -297,7 +297,7 @@
         fulcro-tempid->generated-id
                (into {} (keep (fn [[k id :as ident]]
                                 (when (and (tempid/tempid? id) (not (native-ident? env ident)))
-                                  [id (generate-next-id env k)])) idents))]
+                                  [id (generate-next-id env k id)])) idents))]
     fulcro-tempid->generated-id))
 
 (>defn delta->txn
